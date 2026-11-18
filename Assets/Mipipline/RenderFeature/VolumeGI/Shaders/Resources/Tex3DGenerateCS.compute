@@ -1,0 +1,75 @@
+#pragma kernel CSMain
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#define FIXED_SCALE 100000.0
+float DecodeFloatFromInt(int x)
+{
+    return float(x) / FIXED_SCALE;
+}
+
+RWStructuredBuffer<int> coefficientVoxel;
+RWTexture3D<float4> _Tex3DGIL0;
+RWTexture3D<float4> _Tex3DGIL10;
+RWTexture3D<float4> _Tex3DGIL11;
+RWTexture3D<float4> _Tex3DGIL12;
+RWTexture3D<float4> _Tex3DAO;
+
+#define bytesize 13
+float4 groupsize;
+[numthreads(1,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    //取probe的id
+    int index = id.x * (int)groupsize.y * (int)groupsize.z  + id.y*(int) groupsize.z + id.z;
+    int l0_R = coefficientVoxel[index*bytesize];
+    int l0_G = coefficientVoxel[index*bytesize+1];
+    int l0_B = coefficientVoxel[index*bytesize+2];
+
+    int l1_R00 = coefficientVoxel[index*bytesize+3];
+    int l1_G00 = coefficientVoxel[index*bytesize+4];
+    int l1_B00 = coefficientVoxel[index*bytesize+5];
+
+    int l1_R01 = coefficientVoxel[index*bytesize+6];
+    int l1_G01 = coefficientVoxel[index*bytesize+7];
+    int l1_B01 = coefficientVoxel[index*bytesize+8];
+
+    int l1_R02 = coefficientVoxel[index*bytesize+9];
+    int l1_G02 = coefficientVoxel[index*bytesize+10];
+    int l1_B02 = coefficientVoxel[index*bytesize+11];
+    
+    int skyAO = coefficientVoxel[index*bytesize+12];
+
+    float rl0 =  DecodeFloatFromInt(l0_R);
+    float gl0 =  DecodeFloatFromInt(l0_G);
+    float bl0 =  DecodeFloatFromInt(l0_B);
+
+    float rl10 = DecodeFloatFromInt(l1_R00);
+    float gl10 = DecodeFloatFromInt(l1_G00);
+    float bl10 = DecodeFloatFromInt(l1_B00);
+
+    float rl11 = DecodeFloatFromInt(l1_R01);
+    float gl11 = DecodeFloatFromInt(l1_G01);
+    float bl11 = DecodeFloatFromInt(l1_B01);
+
+    float rl12 = DecodeFloatFromInt(l1_R02);
+    float gl12 = DecodeFloatFromInt(l1_G02);
+    float bl12 = DecodeFloatFromInt(l1_B02);
+    
+    float skyAOfloat = DecodeFloatFromInt(skyAO);
+    
+    // rl0 = 1;
+    // gl0 = -0.5;
+    // bl0 = 2;
+    
+    float rate = 60;
+    float add_rate = 0.5;
+
+    
+    _Tex3DGIL0[id.xyz] = float4(rl0/rate+add_rate,gl0/rate+add_rate,bl0/rate+add_rate,skyAOfloat/rate+add_rate);
+    
+    _Tex3DGIL10[id.xyz] = float4(rl10/rate+add_rate,gl10/rate+add_rate,bl10/rate+add_rate,rl0/rate);
+    _Tex3DGIL11[id.xyz] = float4(rl11/rate+add_rate,gl11/rate+add_rate,bl11/rate+add_rate,gl0/rate);
+    _Tex3DGIL12[id.xyz] = float4(rl12/rate+add_rate,gl12/rate+add_rate,bl12/rate+add_rate,bl0/rate);
+    
+    
+}

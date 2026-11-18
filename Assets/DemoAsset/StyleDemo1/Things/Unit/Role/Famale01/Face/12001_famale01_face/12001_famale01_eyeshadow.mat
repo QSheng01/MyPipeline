@@ -1,0 +1,213 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 12001_famale01_eyeshadow
+  m_Shader: {fileID: 4800000, guid: 3df16bc37121b294aa8b0ec01b626f6b, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _Normal
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: 3000
+  stringTagMap:
+    RenderType: Transparent
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 2e556c8b6564e874199d6310d1ae6abe, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CustomGIMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EffectMaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EvnCubemap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LightMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NPRLightMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AOIntensity: 1
+    - _AOMASKChina: 1
+    - _AlphaClip: 0
+    - _BaseMapTip: 1
+    - _BaseSetting: 1
+    - _Brightness: 1
+    - _BumpStrength: 1
+    - _CharacterEffectGrade: 0
+    - _Cull: 2
+    - _CustomShadowDepthBias: 1
+    - _CustomShadowNormalBias: 0.01
+    - _Cutoff: 0.5
+    - _DHDIFFUSERAMP: 1
+    - _DiffuseSetting: 1
+    - _DiffuseTip1: 1
+    - _DstBlend: 10
+    - _ENVSPECULARMASKChina: 1
+    - _EffectFresnelFactor: 1
+    - _EffectFresnelPower: 2
+    - _EffectFresnelSetting: 1
+    - _EffectFresnelSmooth: 1
+    - _EffectFresnelThreshold: 0
+    - _EffectMaskTip: 1
+    - _EmissionSetting: 1
+    - _EmissionTip: 1
+    - _Emission_ColorWeight: 1
+    - _Emission_Instensity: 0
+    - _Emission_Lerp: 0
+    - _EnvRotate: 0
+    - _EnvShadingSetting: 1
+    - _FaceArea: 0
+    - _HeavyShadowIntensity: 1
+    - _HeavyShadowRange: 0.21
+    - _HeavyShadowSetting: 1
+    - _HeavyShadowSoftness: 0.6
+    - _HitRimFactor: 0
+    - _HitRimPower: 1
+    - _HitRimSmooth: 1
+    - _HitRimThreshold: 0
+    - _HitSetting: 1
+    - _IDMASKChina: 1
+    - _IndirectIntensity: 0
+    - _IsBakeGIMap: 0
+    - _MapSetting: 0
+    - _MaskTip: 1
+    - _MetaIntensity: 0
+    - _MetallicBias: 0
+    - _MetallicScale: 0.5
+    - _Mode: 0
+    - _MultipleLightBlend: 0.5
+    - _MultipleLightIntensity: 2.5
+    - _MultipleLightSetting: 1
+    - _ObjectCoordinateAxisHeight: 0
+    - _Offset_Z: 0
+    - _OutLineSetting: 1
+    - _OutlineType: 0
+    - _Outline_Width: 1
+    - _PlaneShadowDistanceDisappearPos: -0.5
+    - _PlaneShadowDistanceDisappearSoftness: 2.1
+    - _PlaneShadowHeightOffset: 0
+    - _PlaneShadowHorizontalOffset: 0
+    - _PlaneShadowSetting: 0
+    - _RampSize: 0.3
+    - _RampUV_Y: 0.5
+    - _RampYOffset: 0
+    - _ReceiveShadowOff: 1
+    - _Reversal: 0
+    - _RimColorBlendAlbedo: 0.5
+    - _RimDepthWidth: 0.01
+    - _RimLambertMaskThreshold: 0.5
+    - _RimLightBlendAlbedo: 0.5
+    - _RimLightBrightness: 1
+    - _RimLightDirIntensity: 0.5
+    - _RimLightRange: 0.5
+    - _RimLightSetting: 0
+    - _RimSetting: 1
+    - _RimThreshold: 0.65
+    - _RimUseCustomLightDirTip: 1
+    - _SDFInfo1: 1
+    - _SDFInfo2: 1
+    - _SDFInfo3: 1
+    - _SDFShadowSetting: 1
+    - _SDFTip1: 1
+    - _SHBrightness: 1
+    - _SHExposure: 1
+    - _SHMask: 1
+    - _SMOOTHMASKChina: 1
+    - _SPECUALINTENSITYMASKChina: 1
+    - _ShadowColorOffset: 0.2
+    - _ShadowColorTip: 1
+    - _ShadowIntensity: 1
+    - _ShadowOffsetTip: 1
+    - _ShadowSetting: 1
+    - _SmoothnessBias: 0
+    - _SmoothnessScale: 1
+    - _SpecularAlbedoWeight: 0
+    - _SpecularIntensity: 2
+    - _SpecularSetting: 1
+    - _SrcBlend: 5
+    - _Surface: 1
+    - _SurfaceSetting: 1
+    - _TransparentShadow: 1
+    - _USEOUTLINE: 0
+    - _USE_ENV_MASK: 1
+    - _USE_SH_MASK: 0
+    - _UseEffectFresnel: 0
+    - _UseEffectFresnelMask: 0
+    - _UseHalfLambert: 1
+    - _UseHalfLambert1: 1
+    - _WholeEmissionColorTip: 1
+    - _ZTest: 4
+    - _ZWrite: 0
+    - _useRim: 0
+    m_Colors:
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _CharacterShadowColor: {r: 0.53, g: 0.53, b: 0.53, a: 1}
+    - _CubemapColor: {r: 1, g: 1, b: 1, a: 1}
+    - _DarkColor: {r: 0.97, g: 0.8536, b: 0.8536, a: 0.5}
+    - _EffectFresnelColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    - _FaceForward: {r: 0.00000047286903, g: -0.00000001637941, b: 1.0000004, a: 4}
+    - _FaceRight: {r: 1, g: 0, b: 0, a: 0}
+    - _HColor: {r: 1, g: 1, b: 1, a: 1}
+    - _HeavyShadowColor: {r: 0.9150943, g: 0.7208526, b: 0.7476077, a: 1}
+    - _HitRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
+    - _PlaneShadowColor: {r: 0, g: 0, b: 0, a: 0.6}
+    - _RimColor: {r: 1, g: 1, b: 0.8245283, a: 1}
+    - _RimLightColor: {r: 1, g: 1, b: 1, a: 1}
+    - _RimLightDir: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _WholeEmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - custom_SHAb: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHAg: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHAr: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHBb: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHBg: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHBr: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHC: {r: 0, g: 0, b: 0, a: 0}
+  m_BuildTextureStacks: []

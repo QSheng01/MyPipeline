@@ -1,0 +1,704 @@
+// Hair lighting
+#ifndef UNIVERSAL_LIGHTING_INCLUDED
+#define UNIVERSAL_LIGHTING_INCLUDED
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Debug/Debugging3D.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GlobalIllumination.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RealtimeLights.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/AmbientOcclusion.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DBuffer.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/WetSurface.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/RealtimeLights.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/Core.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/EvaluateMaterial.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/Shaders/Hair/HairDefine.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/Shaders/PreIntegratedFGD/PreIntegratedFGD.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/LightingData.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/BRDF.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/ForwardLightLoop.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/AreaLight/AreaLightEvaluation.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MostRepresentativePoint.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+///////////////////////////////////////////////////////////////////////////////
+//                     Math Functions                                        //
+///////////////////////////////////////////////////////////////////////////////
+
+// max absolute error 9.0x10^-3
+// Eberly's polynomial degree 1 - respect bounds
+// 4 VGPR, 12 FR (8 FR, 1 QR), 1 scalar
+// input [-1, 1] and output [0, PI]
+half acosFast(half inX) 
+{
+    half x = abs(inX);
+    half res = -0.156583f * x + 0.5 * half(PI);
+    res *= sqrt(1.0f - x);
+    return inX >= 0 ? res : half(PI) - res;
+}
+
+
+// Same cost as acosFast + 1 FR
+// Same error
+// input [-1, 1] and output [-PI/2, PI/2]
+half asinFast(half x)
+{
+    return 0.5 * half(PI) - acosFast(x);
+}
+
+inline half Pow2(half x)
+{
+    return x * x;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//                      Lighting Functions                                   //
+///////////////////////////////////////////////////////////////////////////////
+
+// Ref: "Light Scattering from Human Hair Fibers"
+// Longitudinal scattering as modeled by a normal distribution.
+// To be used as an approximation to d'Eon et al's Energy Conserving Longitudinal Scattering Function.
+// TODO: Move me to BSDF.hlsl
+
+real3 D_LongitudinalScatteringGaussian(real3 thetaH, real3 beta)
+{
+    beta = max(beta, 1e-5); // zero-div guard
+
+    const real sqrtTwoPi = 2.50662827463100050241;
+    return rcp(beta * sqrtTwoPi) * exp(-Sq(thetaH) / (2 * Sq(beta)));
+}
+
+float ModifiedRefractionIndex(float cosThetaD)
+{
+    // Original derivation of modified refraction index for arbitrary IOR.
+    // float sinThetaD = sqrt(1 - Sq(cosThetaD));
+    // return sqrt(Sq(eta) - Sq(sinThetaD)) / cosThetaD;
+
+    // Karis approximation for the modified refraction index for human hair (1.55)
+    return 1.19 / cosThetaD + (0.36 * cosThetaD);
+}
+
+// Gaussian Distribution for M term
+inline float Hair_G(float B, float Theta)
+{
+    // Clamp B for the denominator term, as otherwise the Gaussian normalization returns too high value.
+    // This clamps allow to prevent large value for low roughness, while keeping the highlight shape/sharpness 
+    // similar.
+    const float DenominatorB = max(B, 0.01f); // @IllusionRP: Very important when light intensity is very high.
+    const float SQRT2PI  = 2.50663f;
+    return exp(-0.5 * Pow2(Theta) / (B * B)) / (SQRT2PI * DenominatorB);
+}
+
+// Const IOR for Hair Fresnel
+inline half Hair_F(half u)
+{
+    // const half n = 1.55;
+    // const half F0 = Pow2((1 - n) / (1 + n));
+    // return F0 + (1 - F0) * pow(1 - vDotH, 5);
+    
+    return F_Schlick(DEFAULT_HAIR_SPECULAR_VALUE, u);
+}
+
+// Reference: [Hair Rendering and Shading]
+half KajiyaKay(half3 T, half3 H, half specularExponent)
+{
+    half TdotH = dot(T, H);
+    half sinTHSq = saturate(1.0 - TdotH * TdotH);
+
+    half dirAttention = smoothstep(-1.0, 0.0, sinTHSq);
+
+    // No energy conservation
+    return dirAttention * pow(sinTHSq, specularExponent);
+}
+
+bool ShouldEvaluateThickObjectTransmission(half3 L, half3 normalWS)
+{
+    // Currently, we don't consider (NdotV < 0) as transmission.
+    // TODO: ignore normal map? What about double sided-surfaces with one-sided normals?
+    float NdotL = dot(normalWS, L);
+    return NdotL < float(0.0);
+}
+
+// Reference: [The Process of Creating Volumetric-based Materials in Uncharted 4]
+half3 HairVolumetricBacklitScatter(half3 albedo, half3 L, half3 V, half3 N, HairData hairData)
+{
+    const half ScatterPower = 9;
+    const half lightScale = 1;
+
+    half3 NoisedL = normalize(L + hairData.Noise * 0.25);
+    half NdotL = dot(N, NoisedL);
+    half NdotV = dot(N, V);
+    half VdotL = dot(V, NoisedL);
+    half CosThetaL = saturate(abs(NdotL));
+    half CosThetaV = saturate(abs(NdotV));
+    
+    half3 scatterFresnel = pow(1.0 - CosThetaV, hairData.RimPower);
+    half3 scatterLight = pow(saturate(-VdotL), ScatterPower) * 
+                        (1.0 - CosThetaV) *
+                        saturate(1.0 - CosThetaL);
+    
+    half3 transAmount = scatterFresnel + lightScale * scatterLight;
+    return lerp(1, albedo, 0.8) * hairData.Tint * transAmount * hairData.Backlit;
+}
+
+half3 KajiyaKayDiffuseAttenuation(half3 Albedo, half3 L, half3 V, half3 N, half Scatter, half Shadow)
+{
+    half KajiyaDiffuse = 1 - abs(dot(N, L));
+    
+    half3 FakeNormal = normalize(V - N * dot(V, N));
+    N = FakeNormal;
+    
+    // Hack approximation for multiple scattering.
+    float MinValue = 0.0001f;
+    half Wrap = 1;
+    half NoL = saturate((dot(N, L) + Wrap) / Pow2(1 + Wrap));
+    half DiffuseScatter = lerp(NoL, KajiyaDiffuse, 0.33) * Scatter; // * INV_PI
+    half Luma = Luminance(Albedo);
+    half3 BaseOverLuma = abs(Albedo / max(Luma, MinValue));
+    half3 ScatterTint = Shadow < 1 ? pow(BaseOverLuma, 1 - Shadow) : 1;
+    return sqrt(abs(Albedo)) * DiffuseScatter * ScatterTint;
+}
+
+half3 KajiyaKayDiffuseAttenuation(half3 Albedo, half3 L, half3 V, half3 N, HairData HairData)
+{
+    const half Scatter = 0.5f;
+    Albedo = saturate(ComputeDiffuseColor(Albedo, HairData.Metallic));
+    return KajiyaKayDiffuseAttenuation(Albedo, L, V, HairData.Tangent, Scatter, HairData.Shadow);
+}
+
+// Reference: [The Process of Creating Volumetric-based Materials in Uncharted 4]
+half3 UnchartedDiffuseAttenuation(half3 Albedo, half3 L, half3 V, half3 N, HairData HairData)
+{
+    Albedo = saturate(ComputeDiffuseColor(Albedo, HairData.Metallic));
+    float NdotL = dot(N, L);
+    half Wrap = 0.5f;
+    half3 scatterColor = lerp(float3(0.992, 0.808, 0.518), Albedo, 0.5); 
+    half3 diffuse = saturate(NdotL + Wrap) / (1 + Wrap); // 0 < w <1
+    half3 scatterLight = saturate(scatterColor + saturate(NdotL)) * diffuse;
+    return Albedo * scatterLight * HairData.Shadow; // * INV_PI
+}
+
+half3 HairKajiyaKay(BRDFData brdfData, half3 L, half3 V, float3 N, HairData HairData)
+{
+    float3 T = HairData.Tangent;
+    float clampedNdotL = saturate(dot(N, L));
+    half LdotV = dot(L, V);
+    half invLenLV = rsqrt(max(2.0 * LdotV + 2.0, FLT_EPS));    // invLenLV = rcp(length(L + V)), clamp to avoid rsqrt(0) = inf, inf * 0 = NaN
+    half LdotH = saturate(invLenLV * LdotV + invLenLV);
+    half3 H = normalize(L + V);
+    half Shift1 = 0.015;
+    half Shift2 = 0.015 * 2;
+    half3 T1 = ShiftTangent(T, N, Shift1 + HairData.Noise);
+    half3 T2 = ShiftTangent(T, N, Shift2 + HairData.Noise);
+
+    half F = Hair_F(LdotH);
+    
+    half3 spec1 = D_KajiyaKay(T1, H, 50) * 0.1f;
+    half3 spec2 = D_KajiyaKay(T2, H,  HairData.HighLight * 4000) * 0.12f;
+    
+    // Bypass the normal map...
+    float geomNdotV = dot(HairData.GeomNormal, V);
+
+    // G = NdotL * NdotV.
+    half3 specR = 0.25 * F * (spec1 + spec2) * clampedNdotL * saturate(geomNdotV * FLT_MAX);
+
+    specR *= HairData.Tint;
+    specR = -min(-specR, 0);
+    
+#if REAL_IS_HALF
+    specR = specR - HALF_MIN;
+    specR = clamp(specR, 0.0, 1000.0); // Prevent FP16 overflow on mobiles
+#endif
+
+    return specR;
+}
+
+// Ref: A Practical and Controllable Hair and Fur Model for Production Path Tracing Eq. 9
+float3 AbsorptionFromReflectance(float3 diffuseColor, float azimuthalRoughness)
+{
+    float beta  = azimuthalRoughness;
+    float beta2 = beta  * beta;
+    float beta3 = beta2 * beta;
+    float beta4 = beta3 * beta;
+    float beta5 = beta4 * beta;
+
+    // Least squares fit of an inverse mapping between scattering parameters and scattering albedo.
+    float denom = 5.969 - (0.215 * beta) + (2.532 * beta2) - (10.73 * beta3) + (5.574 * beta4) + (0.245 * beta5);
+    
+    return Pow2(log(diffuseColor) / denom);
+}
+
+half3 HairMarschnerNoPI(BRDFData brdfData, half3 L, half3 V, float3 N, HairData HairData)
+{
+    float3 T = ShiftTangent(HairData.Tangent, N, HairData.Noise);
+
+    float3 specR = 0;
+    half ClampedRoughness = clamp(HairData.Roughness, 1 / 255.0f, 1.0f);
+    half VoL = dot(V, L);
+    half SinThetaL = clamp(dot(T, L), -1.0f, 1.0f);
+    half SinThetaV = clamp(dot(T, V), -1.0f, 1.0f);
+    float CosThetaD = cos(0.5 * abs(asinFast(SinThetaV) - asinFast(SinThetaL)));
+
+    float3 Lp = L - SinThetaL * T;
+    float3 Vp = V - SinThetaV * T;
+    float CosPhi = dot(Lp, Vp) * rsqrt(dot(Lp, Lp) * dot(Vp, Vp) + 1e-4);
+    float CosHalfPhi = sqrt(saturate(0.5 + 0.5 * CosPhi));
+
+    // half n = 1.55;
+    float n_prime = 1.19 / CosThetaD + 0.36 * CosThetaD;
+
+    half Shift = HAIR_SHIFT_VALUE;
+    half Alpha[] =
+    {
+        -Shift * 2,
+        Shift,
+        Shift * 4
+    };
+    
+    half Roughness2 = Pow2(ClampedRoughness);
+    half B[] =
+    {
+        HairData.Area + Roughness2,
+        HairData.Area + Roughness2 / 2,
+        HairData.Area + Roughness2 * 2
+    };
+
+    float3 Tp;
+    float Mp, Np, Fp, a, h, f;
+    half ThetaH = SinThetaL + SinThetaV;
+
+    // R
+#if HAIR_MARSCHNER_R
+    half sa = sin(Alpha[0]);
+    half ca = cos(Alpha[0]);
+    float ShiftR = 2 * sa * (ca * CosHalfPhi * sqrt(1 - SinThetaV * SinThetaV) + sa * SinThetaV);
+    #if 0 // Use Separable R
+        float BScale = sqrt(2.0) * CosHalfPhi;
+    #else
+        float BScale = 1;
+    #endif
+    Mp = Hair_G(B[0] * BScale, ThetaH - ShiftR);
+    Np = 0.25 * CosHalfPhi;
+    Fp = Hair_F(sqrt(saturate(0.5 + 0.5 * VoL)));
+    specR += Mp * Np * Fp * (HairData.Tint * 2) * lerp(1, HairData.Backlit, saturate(-VoL));
+#endif
+
+    // TT
+#if HAIR_MARSCHNER_TT
+    Mp = Hair_G(B[1], ThetaH - Alpha[1]);
+    a = 1 / n_prime;
+    h = CosHalfPhi * (1 + a * (0.6 - 0.8 * CosPhi));
+    f = Hair_F( CosThetaD * sqrt(saturate(1 - h * h)));
+    Fp = Pow2(1 - f);
+    
+    Tp = PositivePow(abs(brdfData.albedo), 0.5 * sqrt(1 - Pow2(h * a)) / CosThetaD);
+    
+    Np = exp(-3.65 * CosPhi - 3.98);
+    specR += Mp * Np * Fp * Tp * HairData.Backlit;
+#endif
+
+    // TRT
+#if HAIR_MARSCHNER_TRT
+    Mp = Hair_G(B[2], ThetaH - Alpha[2]);
+    f = Hair_F( CosThetaD * 0.5f);
+    Fp = Pow2(1 - f) * f;
+    Tp = pow(abs(brdfData.albedo), 0.8 / CosThetaD);
+    Np = exp(17 * CosPhi - 16.78);
+    specR += Mp * Np * Fp * Tp;
+#endif
+    
+#if REAL_IS_HALF
+    specR = specR - HALF_MIN;
+    specR = clamp(specR, 0.0, 1000.0); // Prevent FP16 overflow on mobiles
+#endif
+    
+    return half3(specR);
+}
+
+half3 HairMarschner(BRDFData brdfData, half3 L, half3 V, float3 N, HairData HairData)
+{
+    half3 specR = HairMarschnerNoPI(brdfData, L, V, N, HairData);
+    // specR *= INV_PI;
+    
+    // Gate direct light contribution by NdotL to prevent the lobe's near-zero alpha shift
+    // from producing specular when light comes from behind the mesh surface (dot(N,L) < 0).
+    // Applied here (not in HairMarschnerNoPI) so the GI path calling HairMarschnerNoPI directly
+    // with a tangent-plane L vector (dot(N,L) = 0 by construction) is not incorrectly zeroed out.
+
+    // UE4/HDRP omit this entirely because their Marschner runs on strand geometry, where
+    // the fiber cylinder itself occludes back-facing contributions.
+    specR *= saturate(dot(N, L));
+    
+#if REAL_IS_HALF
+    specR = specR - HALF_MIN;
+    specR = clamp(specR, 0.0, 1000.0); // Prevent FP16 overflow on mobiles
+#endif
+    
+    return specR;
+}
+
+half3 HairLighting(BRDFData brdfData, half3 lightColor, half3 lightDirectionWS, float lightAttenuation,
+                            float3 normalWS, half3 viewDirectionWS, float shadow,
+                            HairData HairData, BRDFOcclusionFactor aoFactor)
+{
+    half NdotL = saturate(dot(normalWS, lightDirectionWS));
+    half3 radiance = lightColor * aoFactor.directSpecularOcclusion * lightAttenuation;
+    
+    half3 directSpecularR = 0;
+    half3 directDiffuseR = 0;
+    half3 clearCoatSpecularR = LitSpecular(brdfData, normalWS, lightDirectionWS, viewDirectionWS) * NdotL;
+
+#if _MARSCHNER_HAIR
+    directSpecularR = HairMarschner(brdfData, lightDirectionWS, viewDirectionWS, normalWS, HairData);
+#else
+    directSpecularR = HairKajiyaKay(brdfData, lightDirectionWS, viewDirectionWS, normalWS, HairData);
+#endif
+    
+    directSpecularR = directSpecularR * (1 - HairData.Wet) + clearCoatSpecularR * HairData.Wet;
+    
+#if HAIR_MULTI_SCATTERING
+    directDiffuseR += max(0.0, DIFFUSE_ATTENUATION(brdfData.albedo, lightDirectionWS, viewDirectionWS, normalWS, HairData));
+#else
+    // Hair cards are thin sheets lit from either side.
+    directDiffuseR += saturate(ComputeDiffuseColor(brdfData.albedo, HairData.Metallic)) * abs(dot(normalWS, lightDirectionWS));
+#endif
+    
+    half3 directSpecularT = HairVolumetricBacklitScatter(brdfData.albedo, lightDirectionWS, viewDirectionWS, HairData.GeomNormal, HairData);
+    [branch]
+    if (!ShouldEvaluateThickObjectTransmission(lightDirectionWS, HairData.GeomNormal))
+    {
+        directSpecularT *= shadow;
+    }
+    
+    half3 brdf = (directSpecularR * shadow + directSpecularT) * radiance +
+        directDiffuseR * HairData.WetDiffuseFactor * radiance * shadow;
+    brdf = -min(-brdf, 0);
+    return brdf;
+}
+
+
+half3 HairLighting(BRDFData brdfData, Light light, float3 normalWS,
+                            half3 viewDirectionWS, HairData HairData, BRDFOcclusionFactor aoFactor)
+{
+    return HairLighting(brdfData, light.color, light.direction,
+                        light.distanceAttenuation, normalWS, viewDirectionWS, light.shadowAttenuation, HairData, aoFactor);
+}
+
+#if defined(_AREA_LIGHTS)
+float RoughnessToBlinnPhongSpecularExponent(float roughness)
+{
+    return clamp(2 * rcp(max(roughness * roughness, FLT_EPS)) - 2, FLT_EPS, rcp(FLT_EPS));
+}
+
+float3 RayPlaneIntersect(in float3 rayOrigin, in float3 rayDirection, in float3 planeOrigin, in float3 planeNormal)
+{
+    float dist = dot(planeNormal, planeOrigin - rayOrigin) / dot(planeNormal, rayDirection);
+    return rayOrigin + rayDirection * dist;
+}
+
+//-----------------------------------------------------------------------------
+// EvaluateBSDF_Rect_MRP - Approximation with Most Representative Point
+//-----------------------------------------------------------------------------
+
+half3 EvaluateBSDF_Rect_MRP(BRDFData brdfData, float2 positionSS, float3 positionWS, AreaLightData lightData,
+                            half3 V, float3 N, HairData HairData, BRDFOcclusionFactor aoFactor)
+{
+    half3 lighting = 0;
+
+    // Ref: Moving Frostbite to PBR (Appendix E)
+    // Solve the area lighting using the Most Representative Point detection method.
+    // This is a stop-gap solution until further research is given to LTC support for anisotropic BSDFs.
+    // In the future, when strand-space shading is added, it might be doable to take a "structured sampling" approach.
+
+#if SHADEROPTIONS_BARN_DOOR
+    // Apply the barn door modification to the light data
+    RectangularLightApplyBarnDoor(lightData, positionWS);
+#endif
+
+    float3 unL = lightData.positionRWS - positionWS;
+
+    if (dot(lightData.forward, unL) < FLT_EPS)
+    {
+        const float halfWidth  = lightData.size.x * 0.5;
+        const float halfHeight = lightData.size.y * 0.5;
+
+        // Solid angle computation (brute force or approximate routine).
+        // In our measurements the brute force is slightly more expensive but not by much. Additionally MRP is faster overall
+        // than LTC so we accept the cost for the quality benefit.
+        float4x3 lightVerts;
+        lightVerts[0] = lightData.positionRWS + lightData.right * -halfWidth + lightData.up * -halfHeight; // LL
+        lightVerts[1] = lightData.positionRWS + lightData.right * -halfWidth + lightData.up *  halfHeight; // UL
+        lightVerts[2] = lightData.positionRWS + lightData.right *  halfWidth + lightData.up *  halfHeight; // UR
+        lightVerts[3] = lightData.positionRWS + lightData.right *  halfWidth + lightData.up * -halfHeight; // LR
+
+        const float solidAngle = SolidAngleRectangle(positionWS, lightVerts);
+
+        float3 L;
+
+    #if _MARSCHNER_HAIR
+        // Let's choose a dominant direction with the same philosophy as we have for marschner IBL, using the the vector in the
+        // tangent-camera plane that is orthogonal to the tangent. This provides well-behaved results (though not perfect)
+        // with respect to the reference, instead of the classic reflection vector.
+        const float3 dh = ComputeViewFacingNormal(V, HairData.Tangent);
+
+        // Intersect the dominant specular direction with the light plane.
+        float3 ph = RayPlaneIntersect(positionWS, dh, lightData.positionRWS, lightData.forward);
+
+        // Compute the closest position on the rectangle.
+        ph = ClosestPointRectangle(ph, lightData.positionRWS, -lightData.right, lightData.up, halfWidth, halfHeight);
+
+        // Determine the dominant hemisphere direction based on the camera-light plane angle.
+        const float LdotV = max(dot(-lightData.forward, V), 0);
+
+        // Construct the most representative direction.
+        // We must consider multiple specular lobes, on the backward (R, TRT) and forward (TT) scattering hemisphere.
+        // For the backward hemisphere we handle R and TRT similarly, and use the MRP result (based on the "fake" normal just like how we use it for IBL).
+        // For the forward hemisphere we need to approximate harsher. We can get away with falling back to the light center and modifying the roughness.
+        const float3 LBHemisphere = ph - positionWS;
+        const float3 LFHemisphere = unL;
+        L = SafeNormalize(lerp(LFHemisphere, LBHemisphere, LdotV));
+
+        // Define a factor here to weight the solid angle contribution term to match the reference as close as possible for varying sizes.
+        const float solidAngleFactor = 0.1;
+        // @IllusionRP: HairData.Area widens the longitudinal lobes like HDRP roughnessTT, widen it for the forward hemisphere.
+        const float areaPrime = saturate(HairData.Area + solidAngleFactor * solidAngle);
+        HairData.Area = lerp(areaPrime, HairData.Area, LdotV);
+    #else
+        // For Kajiya instead of MRP, fall back to the light center and modulate the roughnesses by the solid angle.
+        // This isn't perfect for respecting the shape's orientation but generally good enough at widening the distribution for rects of varying size.
+        L = normalize(lightData.positionRWS - positionWS);
+
+        // Again, define a factor to fudge the solid angle to closely match the reference.
+        const float solidAngleFactor = 0.05;
+
+        // @IllusionRP: the Kajiya-Kay exponent is HighLight * 4000, widen it through the Blinn-Phong roughness like HDRP.
+        const float roughness2 = sqrt(2.0 / (HairData.HighLight * 4000.0 + 2.0));
+        HairData.HighLight = RoughnessToBlinnPhongSpecularExponent(saturate(roughness2 + solidAngleFactor * solidAngle)) / 4000.0;
+    #endif
+
+        // Configure a theoretically placed point light at the most important position contributing the area light irradiance.
+        float3 lightColor = lightData.color * solidAngle;
+
+        // Raytracing shadow algorithm require to evaluate lighting without shadow, so it defined SKIP_RASTERIZED_AREA_SHADOWS
+        // This is only present in Lit Material as it is the only one using the improved shadow algorithm.
+    #ifndef SKIP_RASTERIZED_AREA_SHADOWS
+        SHADOW_TYPE shadow = EvaluateShadow_RectArea(positionSS, positionWS, lightData, N, normalize(unL), length(unL));
+        lightColor.rgb *= ComputeShadowColor(shadow, lightData.shadowTint, lightData.penumbraTint);
+    #endif
+
+        // @IllusionRP: HairLighting has no separate diffuse / specular dimmer, the specular dimmer drives the whole lobe set.
+        lighting = HairLighting(brdfData, lightColor * lightData.specularDimmer, L, 1.0, N, V, 1.0, HairData, aoFactor);
+    }
+
+    return lighting;
+}
+#endif
+
+half3 HairGlobalIllumination(BRDFData brdfData, half3 bakedGI, BRDFOcclusionFactor aoFactor, float3 positionWS,
+    half3 normalWS, half3 viewDirectionWS, float2 normalizedScreenSpaceUV, HairData hairData, uint renderingLayers,
+    BRDFData ambientBRDF, half3 ambientNormalWS, half ambientFactor)
+{
+    half3 indirectLighting = 0;
+    float3 N = normalWS;
+    
+    half NoV = saturate(dot(N, viewDirectionWS));
+    // Secondary lobe as it is often more rough (it is the colored one).
+    half roughness = lerp(brdfData.perceptualRoughness, hairData.Roughness, 0.5f);
+    
+    half3 iblR = reflect(-viewDirectionWS, N);
+    // ============================ Diffuse Part ================================== //
+    half3 indirectDiffuse;
+    half normalizationFactor;
+    EvaluateIndirectDiffuseAndReflectionNormalization(positionWS, ambientNormalWS, normalWS,
+        iblR, normalizedScreenSpaceUV, bakedGI, indirectDiffuse, normalizationFactor);
+    // ============================ Diffuse Part ================================== //
+    
+    half3 indirectSpecular = GlossyEnvironmentReflection(iblR, positionWS,
+        roughness, 1.0h, normalizedScreenSpaceUV) * hairData.Tint * normalizationFactor;
+    
+#if HAIR_INDIRECT_MARSCHNER
+    hairData.Backlit = half(0.0); // Skip TT
+    hairData.Area = half(0.2);
+    float3 L = normalize(viewDirectionWS - N * dot(viewDirectionWS, N));
+    indirectSpecular += min(1.f, 2 * HairMarschnerNoPI(brdfData, L, viewDirectionWS, N, hairData));
+#endif
+
+#if PRE_INTEGRATED_FGD
+    float3 specularFGD;
+    float3 diffuseFGD;
+    float3 reflectivity;
+    GetPreIntegratedFGDGGXAndDisneyDiffuse(NoV, roughness, brdfData.specular,
+        specularFGD, diffuseFGD, reflectivity);
+    diffuseFGD = 1;
+    indirectDiffuse *= diffuseFGD * ambientBRDF.diffuse * ambientFactor;
+    indirectSpecular *= specularFGD;
+#else
+    indirectDiffuse *= ambientBRDF.diffuse * ambientFactor;
+    // Reference: BRDF.hlsl EnvironmentBRDF
+    half fresnelTerm = Pow4(1.0 - NoV);
+    indirectSpecular *= EnvironmentBRDFSpecular(brdfData, fresnelTerm);
+#endif
+    
+    indirectLighting = indirectDiffuse * aoFactor.indirectAmbientOcclusion * GetIndirectDiffuseMultiplier(renderingLayers)
+                        + indirectSpecular * aoFactor.indirectSpecularOcclusion;
+    if (IsOnlyAOLightingFeatureEnabled())
+    {
+        indirectLighting = aoFactor.indirectAmbientOcclusion + aoFactor.indirectSpecularOcclusion;
+    }
+    return indirectLighting;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//                      Fragment Functions                                   //
+//       Used by ShaderGraph and others builtin renderers                    //
+///////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+/// Hair lighting
+////////////////////////////////////////////////////////////////////////////////
+
+half4 HairPBR(InputData inputData, SurfaceData surfaceData, HairData HairData)
+{
+    BRDFData brdfData;
+
+    // NOTE: can modify "surfaceData"...
+    InitializeBRDFData(surfaceData, brdfData);
+    WetSurfaceLightingState wetSurface = ApplyWetSurface(inputData.normalizedScreenSpaceUV,
+        surfaceData, inputData, brdfData);
+    HairData.WetDiffuseFactor = 1 - wetSurface.darkness;
+    if (wetSurface.hasWet)
+    {
+        half secondarySmoothness = 1 - HairData.Roughness;
+        secondarySmoothness = ApplyWetSurfaceSmoothness(secondarySmoothness, wetSurface.darkness,
+            wetSurface.specularWeight);
+        HairData.Roughness = 1 - secondarySmoothness;
+    }
+
+    #if defined(DEBUG_DISPLAY)
+    half4 debugColor;
+
+    if (CanDebugOverrideOutputColor(inputData, surfaceData, brdfData, debugColor))
+    {
+        return debugColor;
+    }
+    #endif
+    
+    half4 shadowMask = CalculateShadowMask(inputData);
+    AmbientOcclusionFactor aoFactor = IllusionCreateAmbientOcclusionFactor(inputData, surfaceData);
+#if EVALUATE_AO_MULTI_BOUNCE
+    float NdotV = max(saturate(dot(inputData.normalWS, inputData.viewDirectionWS)), 0.00001);
+    half3 brdfDiffuse = ComputeDiffuseColor(brdfData.albedo, HairData.Metallic);
+    BRDFOcclusionFactor brdfOcclusionFactor = CreateBRDFOcclusionFactorMultiBounce(aoFactor, NdotV, brdfData.perceptualRoughness,
+        surfaceData.occlusion, brdfDiffuse, surfaceData.occlusion, brdfData.specular);
+#else
+    BRDFOcclusionFactor brdfOcclusionFactor = CreateBRDFOcclusionFactor(aoFactor);
+#endif
+    uint meshRenderingLayers = GetMeshRenderingLayer();
+    Light mainLight = IllusionGetMainLight(inputData, shadowMask);
+
+    // NOTE: We don't apply AO to the GI here because it's done in the lighting calculation below...
+    MixRealtimeAndBakedGI(mainLight, wetSurface.originalNormal, inputData.bakedGI);
+
+    LightingData lightingData = CreateLightingData(inputData, surfaceData);
+    lightingData.giColor = HairGlobalIllumination(brdfData, inputData.bakedGI, brdfOcclusionFactor,
+                                              inputData.positionWS,
+                                              inputData.normalWS, inputData.viewDirectionWS,
+                                              inputData.normalizedScreenSpaceUV, HairData, meshRenderingLayers,
+                                              wetSurface.originalBRDF, wetSurface.originalNormal,
+                                              wetSurface.ambientFactor);
+    
+    #ifdef _LIGHT_LAYERS
+    if (IsMatchingLightLayer(mainLight.layerMask, meshRenderingLayers))
+    #endif
+    {
+        lightingData.mainLightColor = HairLighting(brdfData, mainLight, inputData.normalWS,
+                                                            inputData.viewDirectionWS, HairData, brdfOcclusionFactor);
+    }
+
+    #if defined(_ADDITIONAL_LIGHTS)
+    uint pixelLightCount = GetAdditionalLightsCount();
+
+    #if USE_CLUSTER_LIGHT_LOOP
+    for (uint lightIndex = 0; lightIndex < min(URP_FP_DIRECTIONAL_LIGHTS_COUNT, MAX_VISIBLE_LIGHTS); lightIndex++)
+    {
+        CLUSTER_LIGHT_LOOP_SUBTRACTIVE_LIGHT_CHECK
+
+        // Alpha-card hair remains a caster, but skips the selected additional
+        // directional per-object receiver overlay to avoid self-shadow banding.
+        Light light = IllusionGetAdditionalLight(lightIndex, inputData, shadowMask, false);
+
+    #ifdef _LIGHT_LAYERS
+        if (IsMatchingLightLayer(light.layerMask, meshRenderingLayers))
+    #endif
+        {
+            lightingData.additionalLightsColor += HairLighting(brdfData, light, inputData.normalWS, 
+                                                                        inputData.viewDirectionWS, HairData, brdfOcclusionFactor);
+        }
+    }
+    #endif
+
+    LIGHT_LOOP_BEGIN(pixelLightCount)
+        Light light = IllusionGetAdditionalLight(lightIndex, inputData, shadowMask, false);
+
+        #ifdef _LIGHT_LAYERS
+        if (IsMatchingLightLayer(light.layerMask, meshRenderingLayers))
+        #endif
+        {
+            lightingData.additionalLightsColor += HairLighting(
+                brdfData, light, inputData.normalWS, inputData.viewDirectionWS, HairData, brdfOcclusionFactor);
+        }
+    LIGHT_LOOP_END
+    #endif
+
+#if defined(_AREA_LIGHTS)
+    [branch] if (_AreaLightCount > 0)
+    {
+        // Rectangle area lights, most representative point.
+        float2 positionSS = inputData.normalizedScreenSpaceUV * _ScreenParams.xy;
+        for (uint areaLightIndex = 0; areaLightIndex < (uint)_AreaLightCount; areaLightIndex++)
+        {
+            AreaLightData areaLight = _AreaLightDatas[areaLightIndex];
+        #ifdef _LIGHT_LAYERS
+            if (!IsMatchingLightLayer(areaLight.lightLayers, meshRenderingLayers))
+                continue;
+        #endif
+            lightingData.additionalLightsColor += EvaluateBSDF_Rect_MRP(brdfData, positionSS, inputData.positionWS, areaLight,
+                inputData.viewDirectionWS, inputData.normalWS, HairData, brdfOcclusionFactor);
+        }
+    }
+#endif
+
+    #if REAL_IS_HALF
+        // Clamp any half.inf+ to HALF_MAX
+        return min(CalculateFinalColor(lightingData, surfaceData.alpha), HALF_MAX);
+    #else
+        return CalculateFinalColor(lightingData, surfaceData.alpha);
+    #endif
+}
+
+inline float Dither8x8Bayer(int x, int y)
+{
+    const float dither[ 64 ] = {
+        1, 49, 13, 61,  4, 52, 16, 64,
+       33, 17, 45, 29, 36, 20, 48, 32,
+        9, 57,  5, 53, 12, 60,  8, 56,
+       41, 25, 37, 21, 44, 28, 40, 24,
+        3, 51, 15, 63,  2, 50, 14, 62,
+       35, 19, 47, 31, 34, 18, 46, 30,
+       11, 59,  7, 55, 10, 58,  6, 54,
+       43, 27, 39, 23, 42, 26, 38, 22};
+    int r = y * 8 + x;
+    return dither[r] / 64;
+}
+
+inline void ClipHair(in float4 screenPos, in float alpha, in float threshold)
+{
+#ifndef _HAIR_ORDER_INDEPENDENT
+    float4 screenPosNorm = screenPos / screenPos.w;
+    float2 screenUV = screenPosNorm.xy * _ScreenParams.xy;
+    float dither = Dither8x8Bayer(fmod(screenUV.x, 8), fmod(screenUV.y, 8));
+    threshold = lerp(threshold, dither, 0.5);
+#endif
+    AlphaDiscard( alpha, threshold );
+}
+#endif

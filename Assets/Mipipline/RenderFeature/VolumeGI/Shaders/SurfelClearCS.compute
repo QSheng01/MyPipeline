@@ -1,0 +1,44 @@
+#pragma kernel CSMain
+
+#pragma multi_compile _ _VOLUMELOCALBAKE
+
+RWStructuredBuffer<int> _coefficientSH9;  
+
+#if _VOLUMELOCALBAKE
+    int _indexInProbeVolume;
+    RWStructuredBuffer<int> _coefficientVoxel;  
+#endif
+
+#define size 8
+//aaa
+[numthreads(size,size,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint surfelIndex = id.x * size + id.y;
+
+    // atom write result to buffer
+    for(int i=0; i<4; i++)
+    {
+        (_coefficientSH9[i*3+0] = 0);
+        (_coefficientSH9[i*3+1] = 0);
+        (_coefficientSH9[i*3+2] = 0);
+    }
+
+    #if _VOLUMELOCALBAKE
+    /**/
+    // storage to volume
+    if(_indexInProbeVolume >= 0)
+    {
+        const int coefficientByteSize = 13;
+        int offset = _indexInProbeVolume * coefficientByteSize;
+        for(int i=0; i<4; i++)
+        {
+            (_coefficientVoxel[offset + i*3+0] = 0);
+            (_coefficientVoxel[offset + i*3+1] = 0);
+            (_coefficientVoxel[offset + i*3+2] = 0);
+        }
+        (_coefficientVoxel[offset + 12] = 0);
+    }
+    #endif
+
+}

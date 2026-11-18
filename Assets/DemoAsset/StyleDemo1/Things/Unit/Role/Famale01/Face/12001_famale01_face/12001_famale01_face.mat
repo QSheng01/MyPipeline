@@ -1,0 +1,126 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 12001_famale01_face
+  m_Shader: {fileID: 4800000, guid: 3df16bc37121b294aa8b0ec01b626f6b, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _Normal
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: db241c92f1e774d4fb8736f05014c3aa, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EffectMaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LightMap:
+        m_Texture: {fileID: 2800000, guid: 41ef935f824a97d4abf9bd5968bca0e7, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampTex:
+        m_Texture: {fileID: 2800000, guid: 258c1a0f481178b40a425f8d320ae3e7, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaClip: 0
+    - _BaseMapTip: 1
+    - _BaseSetting: 1
+    - _CharacterEffectGrade: 0
+    - _Cull: 2
+    - _CustomShadowDepthBias: 1
+    - _CustomShadowNormalBias: 0.01
+    - _Cutoff: 0.5
+    - _DiffuseSetting: 1
+    - _DiffuseTip1: 1
+    - _DstBlend: 0
+    - _EffectFresnelFactor: 1
+    - _EffectFresnelPower: 2
+    - _EffectFresnelSetting: 1
+    - _EffectFresnelSmooth: 1
+    - _EffectFresnelThreshold: 0
+    - _EffectMaskTip: 1
+    - _EmissionSetting: 1
+    - _EmissionTip: 1
+    - _Emission_Instensity: 0
+    - _Emission_Lerp: 0
+    - _EnvShadingSetting: 1
+    - _FaceArea: 0
+    - _HeavyShadowIntensity: 1
+    - _HeavyShadowRange: 0.21
+    - _HeavyShadowSetting: 1
+    - _HeavyShadowSoftness: 0.6
+    - _HitRimFactor: 0
+    - _HitRimPower: 1
+    - _HitRimSmooth: 1
+    - _HitRimThreshold: 0
+    - _HitSetting: 1
+    - _Mode: 0
+    - _MultipleLightBlend: 0.5
+    - _MultipleLightIntensity: 2.5
+    - _MultipleLightSetting: 1
+    - _Offset_Z: 0
+    - _OutLineSetting: 1
+    - _OutlineType: 0
+    - _Outline_Width: 1
+    - _RampSize: 1
+    - _RampUV_Y: 0.5
+    - _Reversal: 0
+    - _RimColorBlendAlbedo: 0.5
+    - _RimDepthWidth: 0.01
+    - _RimSetting: 1
+    - _RimThreshold: 0.65
+    - _SDFInfo1: 1
+    - _SDFInfo2: 1
+    - _SDFInfo3: 1
+    - _SDFShadowSetting: 1
+    - _SDFTip1: 1
+    - _SHBrightness: 1.37
+    - _ShadowColorTip: 1
+    - _ShadowIntensity: 1
+    - _ShadowOffsetTip: 1
+    - _ShadowSetting: 1
+    - _SrcBlend: 1
+    - _Surface: 0
+    - _TransparentShadow: 0
+    - _USEOUTLINE: 0
+    - _UseEffectFresnel: 0
+    - _UseHalfLambert1: 1
+    - _WholeEmissionColorTip: 1
+    - _ZTest: 4
+    - _ZWrite: 1
+    - _useRim: 0
+    m_Colors:
+    - _BaseColor: {r: 0.92156863, g: 0.9137255, b: 0.9137255, a: 1}
+    - _CharacterShadowColor: {r: 0.5294118, g: 0.5294118, b: 0.5294118, a: 1}
+    - _DarkColor: {r: 0.972549, g: 0.85882354, b: 0.85882354, a: 0.5019608}
+    - _EffectFresnelColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    - _FaceForward: {r: 0, g: 0, b: 1, a: 4}
+    - _FaceRight: {r: 1, g: 0, b: 0, a: 0}
+    - _HColor: {r: 1, g: 1, b: 1, a: 1}
+    - _HeavyShadowColor: {r: 0.9150943, g: 0.7208526, b: 0.7476077, a: 1}
+    - _HitRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
+    - _RimColor: {r: 1, g: 1, b: 0.8245283, a: 1}
+    - _WholeEmissionColor: {r: 0, g: 0, b: 0, a: 1}
+  m_BuildTextureStacks: []

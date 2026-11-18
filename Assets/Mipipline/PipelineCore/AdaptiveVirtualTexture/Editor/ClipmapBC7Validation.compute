@@ -1,0 +1,18 @@
+#pragma kernel Decode
+Texture2DArray<float4> Compressed;
+RWTexture2DArray<float4> Decoded;
+int Width, Slice;
+[numthreads(8,8,1)]
+void Decode(uint3 id : SV_DispatchThreadID)
+{
+    if(any(id.xy >= (uint)Width))return;
+    Decoded[uint3(id.xy,Slice)] = Compressed.Load(int4(id.xy,Slice,0));
+}
+#pragma kernel ReadBlocks
+Texture2D<uint4> EncodedBits;
+RWStructuredBuffer<uint4> BlockWords;
+[numthreads(4,4,1)]
+void ReadBlocks(uint3 id : SV_DispatchThreadID)
+{
+    BlockWords[id.y*4+id.x]=EncodedBits.Load(int3(id.xy,0));
+}

@@ -1,0 +1,16 @@
+{
+  "description": "maliofflinecompiler.",
+  "displayName": "MaliOfflineCompiler",
+  "keywords": [
+    "performance",
+    "shader"
+  ],
+  "name": "com.engine.maliofflinecompiler",
+  "unity": "2020.3",
+  "version": "1.0.0",
+  "author": {
+    "name": "吴汶聪"
+  },
+  "dependencies": {
+  }
+}

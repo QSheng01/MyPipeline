@@ -1,0 +1,23 @@
+﻿#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "AVTMaterialBake.hlsl"
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+#pragma kernel KMain
+uint _level, _pageWidth, _pageBorder;
+uint _basePageScratch;
+float _metersPerTexel;
+float2 _pageWorldOrigin, _pagePhysicalOrigin;
+RWTexture2DArray<float4> _clipmapBase;
+RWTexture2DArray<float4> _clipmapMask;
+[numthreads(8,8,1)]
+void KMain(uint3 id : SV_DispatchThreadID)
+{
+    uint pitch = _pageWidth + 2 * _pageBorder;
+    if (id.x >= pitch || id.y >= pitch) return;
+    // Borders are baked from world coordinates, never copied from an unrelated physical neighbor.
+    float2 positionWS = _pageWorldOrigin + (float2(id.xy) - _pageBorder) * _metersPerTexel;
+    float4 baseMap, maskMap;
+    BakeTerrainMaterial(positionWS, _metersPerTexel, baseMap, maskMap);
+    uint3 target = uint3(uint2(_pagePhysicalOrigin) + id.xy, _level);
+    uint3 baseTarget = _basePageScratch != 0 ? uint3(id.xy, 0) : target;
+    _clipmapBase[baseTarget] = baseMap; _clipmapMask[target] = maskMap;
+}

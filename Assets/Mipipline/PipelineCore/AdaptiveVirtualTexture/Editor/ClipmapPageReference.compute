@@ -1,0 +1,42 @@
+// Independent full-atlas reference: invert physical slot modulo instead of consuming the CPU dirty list or page table.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Assets/Mipipline/PipelineCore/AdaptiveVirtualTexture/ShaderLibrary/AVTMaterialBake.hlsl"
+#pragma kernel Reference
+RWTexture2DArray<float4> ResultBase;
+RWTexture2DArray<float4> ResultMask;
+int PageWidth, Border, PerAxis, Layer;
+float TexelSize;
+float2 TerrainOrigin, Anchor;
+[numthreads(8,8,1)]
+void Reference(uint3 id : SV_DispatchThreadID)
+{
+    uint pitch = (uint)(PageWidth + 2 * Border);
+    if(any(id.xy >= (uint)PerAxis * pitch)) return;
+    int2 slot = int2(id.xy / pitch);
+    int2 local = ((slot - int2(Anchor) % PerAxis) + PerAxis) % PerAxis;
+    float2 worldTexel = (Anchor + float2(local)) * PageWidth + float2(id.xy % pitch) - Border;
+    float4 b, m;
+    BakeTerrainMaterial(TerrainOrigin + worldTexel * TexelSize, TexelSize, b, m);
+    ResultBase[uint3(id.xy,Layer)] = b; ResultMask[uint3(id.xy,Layer)] = m;
+}
+
+
+// Exercise the actual runtime indirection + bilinear sampler at every logical texel,
+// including positions interpolating across every physical page boundary.
+#pragma kernel ProbeSampling
+#include "Assets/Mipipline/PipelineCore/AdaptiveVirtualTexture/ShaderLibrary/ClipmapTexture.hlsl"
+RWStructuredBuffer<float4> ProbeResults;
+[numthreads(8,8,1)]
+void ProbeSampling(uint3 id : SV_DispatchThreadID)
+{
+    uint n = (uint)(PageWidth * PerAxis);
+    if (any(id.xy >= n)) return;
+    float2 logical = float2(id.xy) + 0.375;
+    float2 world = ClipmapPageWindows10[Layer].xy + logical * TexelSize;
+    float4 b, m;
+    float valid = SampleClipmapLevel(world, Layer, b, m);
+    uint index = (id.y * n + id.x) * 3;
+    ProbeResults[index] = b;
+    ProbeResults[index + 1] = m;
+    ProbeResults[index + 2] = valid;
+}

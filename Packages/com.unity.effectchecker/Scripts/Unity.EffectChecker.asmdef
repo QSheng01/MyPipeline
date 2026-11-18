@@ -1,0 +1,24 @@
+{
+    "name": "Unity.EffectChecker",
+    "rootNamespace": "",
+    "references": [
+        "GUID:172351f23656dba4c96ebbaa40de3871"
+    ],
+    "includePlatforms": [
+        "Editor",
+        "WindowsStandalone32",
+        "WindowsStandalone64"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "EPPlus.dll",
+        "LitJson.dll",
+        "System.Drawing.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

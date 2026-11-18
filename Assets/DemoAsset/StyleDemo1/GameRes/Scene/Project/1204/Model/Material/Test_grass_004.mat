@@ -1,0 +1,84 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-3545216823384681611
+MonoBehaviour:
+  m_ObjectHideFlags: 11
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0353a89b1f911e48b9e16bdc9f2e058, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  version: 7
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Test_grass_004
+  m_Shader: {fileID: 4800000, guid: 8cc15e3c24be6bf4da4686eb6ade84fc, type: 3}
+  m_Parent: {fileID: 2100000, guid: 7dc5c9932042267469e923a75c81dd01, type: 2}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords:
+  - Default 0
+  - _GUSTMAPCUS_ON
+  - _MAINLIGHTTOSH_ON
+  - _WIND_ON
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: _BottomColor
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _WindMap:
+        m_Texture: {fileID: 2800000, guid: 4713eb84a50495243b148759287768a5, type: 3}
+        m_Scale: {x: 0, y: 2}
+        m_Offset: {x: 0, y: 0}
+    - _height_map:
+        m_Texture: {fileID: 2800000, guid: 5e3338c9948cb6045a4a39a763987340, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _BaseSetting: 0
+    - _BendPushStrength: 1
+    - _BendSetting: 0
+    - _BottomIntensity: 0.3
+    - _BottomWeight: 0
+    - _DiffuseNormalShift: 0.93
+    - _GlobalSetting: 3
+    - _GrassUp: 1
+    - _HeighLight: 2
+    - _RootSoftness: 3
+    - _TVEWindSetting: 6
+    - _TopWeight: 0
+    - _WindBack: 0
+    - _WindGlobalspeed: 0
+    - _WindGustFreq: 0
+    - _WindGustStrength: 0
+    - _WindSetting: 0
+    - _WindSpeed: 0
+    - _angle: 0
+    - _excessivePoint: 0.304
+    - _heighLightInstensity: 6
+    - _heighLightPosPower: 3.5
+    - _heighLightRange: 2
+    - _heighLightTimeDirPower: 0.2
+    - _lightIntensity: 0.231
+    - _scale: 0.096
+    m_Colors:
+    - _BottomColor: {r: 1, g: 1, b: 1, a: 1}
+    - _GrassScale: {r: 0.85, g: 1.1, b: 0.6, a: 3.04}
+    - _TopColor: {r: 0.53212786, g: 1, b: 0.4669811, a: 1}
+    - _WindDirection: {r: 0.3, g: 0, b: 0.5, a: 0}
+  m_BuildTextureStacks: []

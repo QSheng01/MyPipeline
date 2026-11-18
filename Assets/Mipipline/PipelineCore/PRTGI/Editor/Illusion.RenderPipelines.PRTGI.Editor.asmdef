@@ -1,0 +1,7 @@
+{
+  "name": "Illusion.RenderPipelines.PRTGI.Editor",
+  "rootNamespace": "Illusion.Rendering.PRTGI.Editor",
+  "references": ["Illusion.RenderPipelines"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

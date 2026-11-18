@@ -1,0 +1,479 @@
+using System;
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
+using UnityEditor.Rendering;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+using PrefilterMode = Illusion.Rendering.IllusionRendererFeature.PrefilterMode;
+using UrpBuildPreprocessor = UnityEditor.Rendering.Universal.ShaderBuildPreprocessor;
+
+namespace Illusion.Rendering.Editor
+{
+    [Flags]
+    internal enum ShaderFeatures : long
+    {
+        None = 0,
+        ScreenSpaceReflection = 1L << 0,
+        ScreenSpaceGlobalIllumination = 1L << 1,
+        ScreenSpaceOcclusion = 1L << 2,
+        MainLightShadowsScreen = 1L << 3,
+        PrecomputedRadianceTransferGI = 1L << 4,
+        ScreenSpaceSubsurfaceScattering = 1L << 5,
+        OrderIndependentTransparency = 1L << 6,
+        TransparentPerObjectShadow = 1L << 7,
+        FragmentShadowBias = 1L << 8,
+        ContactShadows = 1L << 9,
+        PercentageCloserSoftShadows = 1L << 10,
+        TransparentDepthPostPass = 1L << 11,
+        TransparentOverdraw = 1L << 12,
+        TransparentScreenSpaceReflection = 1L << 13,
+        AreaLights = 1L << 14,
+        AreaShadowMedium = 1L << 15,
+        AreaShadowHigh = 1L << 16,
+        PathTracing = 1L << 17,
+        DeferredRendering = 1L << 18,
+        Renderer2D = 1L << 19,
+        UnmanagedScreenSpaceOcclusion = 1L << 20,
+        RayTracedGlobalIllumination = 1L << 21,
+        All = ~0
+    }
+
+    internal sealed class IllusionShaderBuildData
+    {
+        private readonly ShaderFeatures[] _rendererFeatures;
+
+        private readonly Dictionary<int, ShaderFeatures> _resourceShaders;
+
+        internal IllusionShaderBuildData(
+            BuildTarget target,
+            bool isValid,
+            bool stripUnusedVariants,
+            ShaderFeatures[] rendererFeatures,
+            Dictionary<int, ShaderFeatures> resourceShaders = null,
+            UrpKeywordState[] urpKeywordStates = null,
+            bool stripUrpVariants = false)
+        {
+            Target = target;
+            IsValid = isValid;
+            StripUnusedVariants = stripUnusedVariants;
+            _rendererFeatures = rendererFeatures ?? Array.Empty<ShaderFeatures>();
+            _resourceShaders = resourceShaders ?? new Dictionary<int, ShaderFeatures>();
+            UrpKeywordStates = urpKeywordStates ?? Array.Empty<UrpKeywordState>();
+            StripUrpVariants = stripUrpVariants;
+        }
+
+        internal BuildTarget Target { get; }
+
+        internal bool IsValid { get; }
+
+        internal bool StripUnusedVariants { get; }
+
+        internal IReadOnlyList<ShaderFeatures> RendererFeatures => _rendererFeatures;
+
+        internal IReadOnlyList<UrpKeywordState> UrpKeywordStates { get; }
+
+        internal bool StripUrpVariants { get; }
+
+        internal bool AnyRendererSupports(ShaderFeatures required, bool requireAll = false)
+        {
+            for (int i = 0; i < _rendererFeatures.Length; i++)
+            {
+                ShaderFeatures available = _rendererFeatures[i];
+                if (requireAll ? (available & required) == required : (available & required) != 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        internal bool IsUnreachableResourceShader(UnityEngine.Object shader)
+        {
+            return _resourceShaders.TryGetValue(shader.GetEntityId().GetHashCode(), out ShaderFeatures required) && !AnyRendererSupports(required);
+        }
+    }
+
+    /// <summary>
+    /// Updates IllusionRP keyword prefiltering before Unity expands shader variants.
+    /// </summary>
+    internal sealed class UpdateShaderPrefilteringDataBeforeBuild : IPreprocessShaders
+    {
+        public int callbackOrder => -99; // After URP
+
+        public UpdateShaderPrefilteringDataBeforeBuild()
+        {
+            ShaderBuildPreprocessor.Gather(EditorUserBuildSettings.activeBuildTarget);
+        }
+
+        public void OnProcessShader(
+            Shader shader,
+            ShaderSnippetData snippet,
+            IList<ShaderCompilerData> compilerDataList)
+        {
+        }
+    }
+
+    internal sealed class IllusionShaderBuildPreprocessor : IPreprocessBuildWithReport
+    {
+        public int callbackOrder => -99;
+
+        public void OnPreprocessBuild(BuildReport report)
+        {
+            ShaderBuildPreprocessor.Gather(report.summary.platform);
+        }
+    }
+
+    internal static class ShaderBuildPreprocessor
+    {
+        private static IllusionShaderBuildData s_CurrentData;
+
+        internal static IllusionShaderBuildData CurrentData
+        {
+            get
+            {
+                BuildTarget target = EditorUserBuildSettings.activeBuildTarget;
+                if (s_CurrentData == null || s_CurrentData.Target != target)
+                    Gather(target);
+                return s_CurrentData;
+            }
+        }
+
+        internal static void Gather(BuildTarget target)
+        {
+            try
+            {
+                GatherCore(target);
+            }
+            catch (Exception)
+            {
+                s_CurrentData = new IllusionShaderBuildData(
+                    target,
+                    isValid: false,
+                    stripUnusedVariants: false,
+                    Array.Empty<ShaderFeatures>());
+            }
+        }
+
+        private static void GatherCore(BuildTarget target)
+        {
+            UrpBuildPreprocessor.GatherShaderFeatures(Debug.isDebugBuild);
+            var rendererFeatures = new List<ShaderFeatures>();
+            var urpKeywordStates = new List<UrpKeywordState>();
+            var featureAssets = new HashSet<IllusionRendererFeature>();
+            bool valid = true;
+
+            using (UnityEngine.Pool.ListPool<UniversalRenderPipelineAsset>.Get(out var assets))
+            {
+                if (!target.TryGetRenderPipelineAssets(assets) || assets.Count == 0)
+                {
+                    valid = false;
+                }
+                else
+                {
+                    for (int assetIndex = 0; assetIndex < assets.Count; assetIndex++)
+                    {
+                        UniversalRenderPipelineAsset asset = assets[assetIndex];
+                        if (!asset || asset.m_RendererDataList == null)
+                        {
+                            valid = false;
+                            continue;
+                        }
+
+                        foreach (ScriptableRendererData rendererData in asset.m_RendererDataList)
+                        {
+                            if (!rendererData)
+                            {
+                                valid = false;
+                                continue;
+                            }
+
+                            ScriptableRendererData requirementRenderer = rendererData;
+                            var requirements = UrpBuildPreprocessor.GetRendererRequirements(ref asset, ref requirementRenderer);
+                            ShEvalMode shMode = asset.shEvalMode == ShEvalMode.Auto
+                                ? requirements.needsSHVertexForSHAuto ? ShEvalMode.PerVertex : ShEvalMode.PerPixel
+                                : asset.shEvalMode;
+                            urpKeywordStates.Add(new UrpKeywordState(shMode, requirements.needsReflectionProbeAtlas));
+
+                            ShaderFeatures rendererCapabilities = ShaderFeatures.None;
+                            if (requirements.renderingMode is RenderingMode.Deferred or RenderingMode.DeferredPlus)
+                                rendererCapabilities |= ShaderFeatures.DeferredRendering;
+                            if (rendererData is Renderer2DData)
+                                rendererCapabilities |= ShaderFeatures.Renderer2D;
+
+                            IllusionRendererFeature illusionFeature = null;
+                            int featureCount = 0;
+                            if (rendererData.rendererFeatures == null)
+                            {
+                                valid = false;
+                                rendererFeatures.Add(ShaderFeatures.None);
+                                continue;
+                            }
+
+                            foreach (ScriptableRendererFeature feature in rendererData.rendererFeatures)
+                            {
+                                if (feature is not IllusionRendererFeature candidate)
+                                    continue;
+                                illusionFeature = candidate;
+                                featureCount++;
+                                featureAssets.Add(candidate);
+                            }
+
+                            if (featureCount > 1)
+                            {
+                                valid = false;
+                                rendererFeatures.Add(ShaderFeatures.None);
+                                continue;
+                            }
+
+                            rendererFeatures.Add(rendererCapabilities |
+                                (illusionFeature && illusionFeature.isActive
+                                    ? GetFeatures(illusionFeature)
+                                    : ShaderFeatures.UnmanagedScreenSpaceOcclusion));
+                        }
+                    }
+                }
+            }
+
+            if (rendererFeatures.Count == 0)
+                valid = false;
+
+            IllusionRenderPipelineSettings settings = IllusionRenderPipelineSettings.instance;
+            bool stripUnusedVariants = valid && settings.stripUnusedVariants;
+
+            if (valid)
+            {
+                ApplyPrefilterModes(
+                    featureAssets,
+                    rendererFeatures,
+                    stripUnusedVariants);
+            }
+
+            s_CurrentData = new IllusionShaderBuildData(
+                target,
+                valid,
+                stripUnusedVariants,
+                rendererFeatures.ToArray(),
+                GetResourceShaders(),
+                urpKeywordStates.ToArray(),
+                stripUnusedVariants && UrpBuildPreprocessor.s_StripUnusedVariants);
+        }
+
+        // Pipeline resource shaders that only path tracing or ray traced global illumination can reach.
+        private static Dictionary<int, ShaderFeatures> GetResourceShaders()
+        {
+            var shaders = new Dictionary<int, ShaderFeatures>();
+            var resources = Resources.Load<IllusionRenderPipelineResources>(nameof(IllusionRenderPipelineResources));
+            if (!resources)
+                return shaders;
+            const ShaderFeatures sharedScene = ShaderFeatures.PathTracing | ShaderFeatures.RayTracedGlobalIllumination;
+            (UnityEngine.Object Shader, ShaderFeatures Required)[] candidates =
+            {
+                (resources.pathTracingFGDShader, sharedScene),
+                (resources.pathTracingLightsBakerCS, sharedScene),
+                (resources.pathTracingEnvironmentCS, sharedScene),
+                (resources.pathTracingEmissiveCS, sharedScene),
+                (resources.pathTracingMotionCS, sharedScene),
+                (resources.pathTracingEnvironmentLightingShader, sharedScene),
+                (resources.pathTracingRectangleLightShader, sharedScene),
+                (resources.pathTracingAccumulationCS, ShaderFeatures.PathTracing),
+                (resources.pathTracingRealtimeCS, ShaderFeatures.PathTracing),
+                (resources.pathTracingOutputShader, ShaderFeatures.PathTracing),
+                (resources.rayTracedGICompositeCS, ShaderFeatures.RayTracedGlobalIllumination),
+                (resources.rayTracedGIRadianceCacheCS, ShaderFeatures.RayTracedGlobalIllumination)
+            };
+            foreach (var (shader, required) in candidates)
+            {
+                if (shader)
+                    shaders[shader.GetEntityId().GetHashCode()] = required;
+            }
+            return shaders;
+        }
+
+        private static ShaderFeatures GetFeatures(IllusionRendererFeature feature)
+        {
+            ShaderFeatures features = ShaderFeatures.MainLightShadowsScreen;
+            if (feature.screenSpaceReflection || feature.rayTracedGlobalIllumination)
+                features |= ShaderFeatures.ScreenSpaceReflection;
+            if (feature.screenSpaceGlobalIllumination || feature.rayTracedGlobalIllumination)
+                features |= ShaderFeatures.ScreenSpaceGlobalIllumination;
+            if (feature.groundTruthAO)
+                features |= ShaderFeatures.ScreenSpaceOcclusion;
+            if (feature.precomputedRadianceTransferGI)
+                features |= ShaderFeatures.PrecomputedRadianceTransferGI;
+            if (feature.subsurfaceScattering)
+                features |= ShaderFeatures.ScreenSpaceSubsurfaceScattering;
+            if (feature.orderIndependentTransparency)
+                features |= ShaderFeatures.OrderIndependentTransparency;
+            if (feature.transparentReceivePerObjectShadows)
+                features |= ShaderFeatures.TransparentPerObjectShadow;
+            if (feature.fragmentShadowBias)
+                features |= ShaderFeatures.FragmentShadowBias;
+            if (feature.contactShadows)
+                features |= ShaderFeatures.ContactShadows;
+            if (feature.pcssShadows)
+                features |= ShaderFeatures.PercentageCloserSoftShadows;
+            if (feature.transparentDepthPostPass)
+                features |= ShaderFeatures.TransparentDepthPostPass;
+            if (feature.orderIndependentTransparency && feature.oitTransparentOverdrawPass)
+                features |= ShaderFeatures.TransparentOverdraw;
+            if (feature.screenSpaceReflection && feature.transparentScreenSpaceReflection)
+                features |= ShaderFeatures.TransparentScreenSpaceReflection;
+            if (feature.pathTracing)
+                features |= ShaderFeatures.PathTracing;
+            if (feature.rayTracedGlobalIllumination)
+                features |= ShaderFeatures.RayTracedGlobalIllumination;
+            if (feature.areaLights)
+            {
+                features |= ShaderFeatures.AreaLights;
+                features |= feature.areaShadowFilteringQuality == AreaLights.HDAreaShadowFilteringQuality.High
+                    ? ShaderFeatures.AreaShadowHigh
+                    : ShaderFeatures.AreaShadowMedium;
+            }
+            return features;
+        }
+
+        private static void ApplyPrefilterModes(
+            IEnumerable<IllusionRendererFeature> featureAssets,
+            IReadOnlyList<ShaderFeatures> rendererFeatures,
+            bool enabled)
+        {
+            PrefilterMode safe = PrefilterMode.Select;
+            PrefilterMode subsurface = enabled
+                ? AggregateMode(rendererFeatures, ShaderFeatures.ScreenSpaceSubsurfaceScattering)
+                : safe;
+            PrefilterMode contact = enabled
+                ? RuntimeToggleMode(rendererFeatures, ShaderFeatures.ContactShadows)
+                : safe;
+            PrefilterMode pcss = enabled
+                ? RuntimeToggleMode(rendererFeatures, ShaderFeatures.PercentageCloserSoftShadows)
+                : safe;
+            PrefilterMode prt = enabled
+                ? AggregateMode(rendererFeatures, ShaderFeatures.PrecomputedRadianceTransferGI)
+                : safe;
+            PrefilterMode transparentShadow = enabled
+                ? AggregateMode(rendererFeatures, ShaderFeatures.TransparentPerObjectShadow)
+                : safe;
+            PrefilterMode ssr = enabled
+                ? AggregateMode(rendererFeatures, ShaderFeatures.ScreenSpaceReflection)
+                : safe;
+            PrefilterMode ssao = enabled
+                ? ScreenSpaceOcclusionMode(rendererFeatures)
+                : safe;
+            PrefilterMode ssgi = enabled
+                ? AggregateMode(rendererFeatures, ShaderFeatures.ScreenSpaceGlobalIllumination)
+                : safe;
+            PrefilterMode fragmentBias = enabled
+                ? AggregateMode(rendererFeatures, ShaderFeatures.FragmentShadowBias)
+                : safe;
+            IllusionRendererFeature.AreaShadowPrefilterMode areaShadow = enabled
+                ? AreaShadowMode(rendererFeatures)
+                : IllusionRendererFeature.AreaShadowPrefilterMode.All;
+
+            foreach (IllusionRendererFeature feature in featureAssets)
+            {
+                if (!feature)
+                    continue;
+
+                bool changed = false;
+                changed |= SetMode(ref feature.screenSpaceSubsurfaceScatteringPrefilterMode, subsurface);
+                changed |= SetMode(ref feature.contactShadowPrefilterMode, contact);
+                changed |= SetMode(ref feature.percentageCloserSoftShadowsPrefilterMode, pcss);
+                changed |= SetMode(ref feature.precomputedRadianceTransferGIPrefilterMode, prt);
+                changed |= SetMode(ref feature.transparentPerObjectShadowsPrefilterMode, transparentShadow);
+                changed |= SetMode(ref feature.screenSpaceReflectionPrefilterMode, ssr);
+                changed |= SetMode(ref feature.screenSpaceOcclusionPrefilterMode, ssao);
+                changed |= SetMode(ref feature.screenSpaceGlobalIlluminationPrefilterMode, ssgi);
+                changed |= SetMode(ref feature.fragmentShadowBiasPrefilterMode, fragmentBias);
+                if (feature.areaShadowPrefilterMode != areaShadow)
+                {
+                    feature.areaShadowPrefilterMode = areaShadow;
+                    changed = true;
+                }
+
+                if (!changed)
+                    continue;
+                EditorUtility.SetDirty(feature);
+                AssetDatabase.SaveAssetIfDirty(feature);
+            }
+        }
+
+        private static PrefilterMode ScreenSpaceOcclusionMode(IReadOnlyList<ShaderFeatures> renderers)
+        {
+            foreach (ShaderFeatures renderer in renderers)
+                if ((renderer & ShaderFeatures.UnmanagedScreenSpaceOcclusion) != 0)
+                    return PrefilterMode.Select;
+            return AggregateMode(renderers, ShaderFeatures.ScreenSpaceOcclusion);
+        }
+
+        private static PrefilterMode AggregateMode(
+            IReadOnlyList<ShaderFeatures> rendererFeatures,
+            ShaderFeatures feature)
+        {
+            bool any = false;
+            bool all = rendererFeatures.Count > 0;
+            for (int i = 0; i < rendererFeatures.Count; i++)
+            {
+                bool available = (rendererFeatures[i] & feature) != 0;
+                any |= available;
+                all &= available;
+            }
+
+            if (!any)
+                return PrefilterMode.Remove;
+            return all ? PrefilterMode.SelectOnly : PrefilterMode.Select;
+        }
+
+        private static PrefilterMode RuntimeToggleMode(
+            IReadOnlyList<ShaderFeatures> rendererFeatures,
+            ShaderFeatures feature)
+        {
+            for (int i = 0; i < rendererFeatures.Count; i++)
+            {
+                if ((rendererFeatures[i] & feature) != 0)
+                    return PrefilterMode.Select;
+            }
+            return PrefilterMode.Remove;
+        }
+
+        // Off is needed by renderers without area lights, each tier by the renderers that selected it.
+        internal static IllusionRendererFeature.AreaShadowPrefilterMode AreaShadowMode(
+            IReadOnlyList<ShaderFeatures> rendererFeatures)
+        {
+            bool needOff = false;
+            bool needMedium = false;
+            bool needHigh = false;
+            for (int i = 0; i < rendererFeatures.Count; i++)
+            {
+                ShaderFeatures features = rendererFeatures[i];
+                needOff |= (features & ShaderFeatures.AreaLights) == 0;
+                needMedium |= (features & ShaderFeatures.AreaShadowMedium) != 0;
+                needHigh |= (features & ShaderFeatures.AreaShadowHigh) != 0;
+            }
+
+            if (needMedium && needHigh)
+                return needOff
+                    ? IllusionRendererFeature.AreaShadowPrefilterMode.All
+                    : IllusionRendererFeature.AreaShadowPrefilterMode.MediumAndHigh;
+            if (needMedium)
+                return needOff
+                    ? IllusionRendererFeature.AreaShadowPrefilterMode.OffAndMedium
+                    : IllusionRendererFeature.AreaShadowPrefilterMode.MediumOnly;
+            if (needHigh)
+                return needOff
+                    ? IllusionRendererFeature.AreaShadowPrefilterMode.OffAndHigh
+                    : IllusionRendererFeature.AreaShadowPrefilterMode.HighOnly;
+            return IllusionRendererFeature.AreaShadowPrefilterMode.OffOnly;
+        }
+
+        private static bool SetMode(ref PrefilterMode current, PrefilterMode value)
+        {
+            if (current == value)
+                return false;
+            current = value;
+            return true;
+        }
+
+    }
+}

@@ -1,0 +1,256 @@
+﻿
+/**
+EXCLUDE_BACKGROUND编译选项表示在生成反射贴图时，是否剔除掉无穷远的像素（例如天空盒）。
+在URP的管线流程中，假如我们在RenderSkyBox这个Pass之前去读CameraColorTexture，会拿到上一帧残留的天空像素
+**/
+
+#pragma target 5.0
+#pragma kernel DrawReflectionTex1
+#pragma kernel DrawReflectionTex1 EXCLUDE_BACKGROUND
+#pragma kernel FillHoles
+#pragma kernel CSClear
+#pragma kernel GenResult
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+// TODO: fix warning "HLSLcc: The resource '_Result' uses an unsupported type/format for read/write access at kernel FillHoles"
+RWTexture2D<float4> _Result;
+Texture2D<half4> _CameraColorTexture;
+Texture2D<float> _CameraDepthTexture;
+
+float4x4 _MatrixInvVP;
+float4x4 _MatrixVP;
+
+float3 _PlanarPosition;
+float3 _PlanarNormal;
+float3 _CameraFoward;
+
+float _FadeOutScreenBorderWidthVertical;
+float _FadeOutScreenBorderWidthHorizontal; //compute shader can't declare half type input, so use float
+
+SamplerState PointClampSampler;
+SamplerState LinearClampSampler;
+
+/////////////////////////////////////////////////防抖动有关参数//////////////////////////////////////////
+RWTexture2D<uint> _IntResult;
+uint2 _ResultSize;
+#define INDEX(id) id
+float2 _ResultTex_TexelSize;
+float _PlanarPositionW;
+
+
+float3 TransformPositionCSToWS(float3 positionCS){
+    //_MatrixInvVP为VP的逆矩阵
+    float4 positionWS = mul(_MatrixInvVP,float4(positionCS,1));
+    positionWS /= positionWS.w;
+    return positionWS.xyz;
+}
+
+float3 ReconstructPositionWS(float2 uv, float depth){
+    //使用uv和depth，可以得到ClipSpace的坐标
+    float3 positionCS = float3(uv * 2 -1,depth);
+#if UNITY_UV_STARTS_AT_TOP
+	positionCS.y = -positionCS.y;
+#endif
+    //然后将坐标从ClipSpace转换到世界坐标
+    float3 positionWS = TransformPositionCSToWS(positionCS);
+
+   #ifdef EXCLUDE_BACKGROUND
+        #if UNITY_REVERSED_Z
+        //判定无穷远
+        if(depth == 0)
+        #else
+        if(depth == 1)
+        #endif
+        {
+            positionWS= float3(0,0,0); 
+        }
+   #endif
+    return positionWS;
+}
+
+float3 Reproject(float3 positionWS){
+    float4 positionCS = mul(_MatrixVP,float4(positionWS,1));
+    positionCS /= positionCS.w;
+    positionCS.xy = (positionCS.xy + 1) * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+	positionCS.y = 1.0 - positionCS.y;
+#endif
+    return positionCS.xyz;
+}
+
+//返回float4的xyz分量为镜像坐标，w为坐标到平面的距离
+float4 GetMirrorPositionWS(float3 positionWS){
+    float normalProj = dot(positionWS - _PlanarPosition,_PlanarNormal);
+    return float4(positionWS - normalProj * _PlanarNormal * 2,normalProj);
+}
+
+
+float3 GetMirrorUVDepthFromID(float3 posWS){
+    float4 mirrorPositionWS =  GetMirrorPositionWS(posWS);
+    if (mirrorPositionWS.w > 0.01)
+    {
+        float3 uvAndDepth = Reproject(mirrorPositionWS.xyz);
+        return uvAndDepth;
+    }
+    else
+        // 返回负数，这样可以不进行后面的InterlockedMin，节省大量性能
+        return float3(-1, -1, 0);
+}
+
+
+half ConvertOpaqueColorRTScreenUVToFadeAlphaParam(float2 screenUV, float downValue)
+{
+    //fadeout  using vertical uv.y (only fadeout if reaching _CameraOpaqueTexture's uv border top)
+    //  downValue * 0.5f
+    // 低头的时候 downValue 上升到接近1
+    // screenUV.y + 的时候，模糊直线上移动
+    //half fadeoutAlpha = smoothstep(1, 1-_FadeOutScreenBorderWidthVertical, (1.0f - screenUV.y + downValue) / 0.5f);
+    half fadeoutAlpha = 1- smoothstep(1-_FadeOutScreenBorderWidthVertical, 1, screenUV.y);
+    //fadeout using horizontal uv.x
+    //TODO: better fadeout
+    fadeoutAlpha *= smoothstep(1, 1 - _FadeOutScreenBorderWidthHorizontal , abs(screenUV.x * 2 - 1));
+    return fadeoutAlpha;
+}
+
+//Draw Reflection Tex
+[numthreads(8,8,1)]
+void DrawReflectionTex1 (uint3 id : SV_DispatchThreadID){
+    // 常规 compute shader 初始化
+    _Result[id.xy] = half4(0, 0, 0, 0);
+
+    // compute shader 的 uv
+    float2 uv = id.xy * _ResultTex_TexelSize.xy;
+
+    // 根据当前的uv,和翻转图，计算出翻转之后的uv和id.xy
+    // 获取对应的映射翻转图uv
+    float2 intResultId = uv * _ResultSize.xy;
+
+    // 获取翻转后的UV
+    uint Hash = _IntResult[intResultId];
+    uint2 HashID = (uint2)0;
+    HashID.x = Hash & 0xFFFF;
+    HashID.y = Hash >> 16;
+    #if UNITY_UV_STARTS_AT_TOP
+    if (Hash == 0xFFFFFFFF)
+    {
+        #else
+    if (Hash == 0)
+    {
+        #endif
+        _Result[INDEX(id).xy] = float4(0,0,0,0);
+        return;
+    }
+    float2 afterUv = float2((float)(HashID.x) / _ResultSize.x, (float)(HashID.y) / _ResultSize.y);
+
+    // 计算相机的forward与平面-normal的点积相似度，用来过渡
+    float cameraCrossValue = dot(_CameraFoward, -_PlanarNormal);
+    // 这里的乘值越大，模糊过渡区，越往上，减值越大，越往下
+    cameraCrossValue = cameraCrossValue * 1.85f - 0.535f;
+    
+    half fadeoutAlpha = ConvertOpaqueColorRTScreenUVToFadeAlphaParam(afterUv, cameraCrossValue);
+    
+    // 根据翻转后的uv，获取id，并读取 CameraColor 贴图
+    _Result[INDEX(id).xy] = float4(_CameraColorTexture.SampleLevel(LinearClampSampler, afterUv, 0).xyz, fadeoutAlpha);//float4(_CameraColorTexture[uv].rgb,mirrorUVAndDepth.z)
+
+    // 测试用
+    // _Result[INDEX(id).xy] = float4(afterUv, 1.0f ,1.0f);
+}
+
+
+half GetGray(float4 color)//计算颜色灰度
+{
+    return color.r*0.22+color.g*0.8+color.b*0.02;
+}
+
+[numthreads(8,8,1)]
+void FillHoles(uint3 id:SV_DispatchThreadID)
+{
+    float4 center=_Result[id.xy];
+    float4 top=_Result[uint2(id.x,id.y+1)];
+    float4 right=_Result[uint2(id.x+1,id.y)];
+    float centerColor=GetGray(center);//求中心灰度
+    float topColor=GetGray(top);//求上面像素灰度
+    float rightColor=GetGray(right);//求左边像素灰度
+    if (centerColor!=0||(topColor+rightColor)==0)return;	//中心点有颜色的排除掉；四周没颜色的点排除掉
+    _Result[id.xy]=topColor>0?top:right;
+    
+}
+
+////////////////////////////////防抖动有关代码/////////////////////////////////////////////////
+[numthreads(32,32,1)]
+void CSClear (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _ResultSize.x && id.y < _ResultSize.y)
+    {
+        // Clear Result
+        #if UNITY_UV_STARTS_AT_TOP
+        _IntResult[INDEX(id.xy)] = 0xFFFFFFFF; // if the y is inverted we will want the smallest value not biggest
+        #else
+        _IntResult[INDEX(id.xy)] = 0;
+        #endif
+    }
+}
+
+[numthreads(32,32,1)]
+void GenResult (uint3 id : SV_DispatchThreadID)
+{
+    // early out
+    if (id.x >= _ResultSize.x || id.y >= _ResultSize.y)
+    {
+        return;
+    }
+
+    // compute shader 的 uv
+    float2 uv = id.xy * _ResultTex_TexelSize.xy;
+ 
+    // 自己的方法
+    // 用 PointClamp 的方式读取当前的 depth
+    float depth = _CameraDepthTexture.SampleLevel(PointClampSampler, uv, 0);
+    #if UNITY_REVERSED_Z
+    depth = depth;
+    #else
+    // Adjust z to match NDC for OpenGL,手机移动平台上面就需要做这样的处理。
+    // UNITY_NEAR_CLIP_VALUE：在Direct3d类平台为0，OpenGL类平台为-1.
+    depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth); 
+    #endif
+    
+    // 根据 depth 和 uv 重建 positionWS
+    float3 positionWS = ReconstructPositionWS(uv,depth);
+    float3 mirrorUVAndDepth = GetMirrorUVDepthFromID(positionWS);
+    float2 reflect_uv = mirrorUVAndDepth.xy;
+
+    // do we have a valid location?
+    if (reflect_uv.x >= 0 && reflect_uv.y >= 0 && reflect_uv.x <= 1.0 && reflect_uv.y <= 1.0)
+    {
+        //#if UNITY_UV_STARTS_AT_TOP
+        //reflect_uv.y =1.0 - reflect_uv.y;
+        //#endif
+        
+        // calculate hash _ResultSize = Size.xy
+        uint2 Location = uint2(reflect_uv.x * _ResultSize.x, reflect_uv.y * _ResultSize.y);
+        uint2 LocationRight = Location + uint2(1, 0);
+        uint2 LocationUp = Location + uint2(0, 1);
+        uint2 LocationLeft = Location + uint2(-1, 0);
+        uint2 LocationDown= Location + uint2(0, -1);
+
+        uint Hash = (id.y << 16) | (id.x & 0xFFFF);
+
+        uint dontCare;
+        #if UNITY_UV_STARTS_AT_TOP
+        InterlockedMin(_IntResult[INDEX(Location)], Hash, dontCare);
+        InterlockedMin(_IntResult[INDEX(LocationRight)], Hash, dontCare);
+        InterlockedMin(_IntResult[INDEX(LocationUp)], Hash, dontCare);
+        InterlockedMin(_IntResult[INDEX(LocationLeft)], Hash, dontCare);
+        InterlockedMin(_IntResult[INDEX(LocationDown)], Hash, dontCare);
+        #else
+        InterlockedMax(_IntResult[INDEX(Location)], Hash, dontCare);
+        InterlockedMax(_IntResult[INDEX(LocationRight)], Hash, dontCare);
+        InterlockedMax(_IntResult[INDEX(LocationUp)], Hash, dontCare);
+        InterlockedMax(_IntResult[INDEX(LocationLeft)], Hash, dontCare);
+        InterlockedMax(_IntResult[INDEX(LocationDown)], Hash, dontCare);
+        #endif
+
+        // _IntResult[INDEX(Location)] = Hash;
+    }
+}

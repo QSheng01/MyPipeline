@@ -1,0 +1,84 @@
+#ifndef ILLUSION_HDRP_LIT_MATERIAL_INCLUDED
+#define ILLUSION_HDRP_LIT_MATERIAL_INCLUDED
+
+static uint g_HDRPSampleIndex;
+static uint g_HDRPVertexIndex;
+// @IllusionRP: Unity reflects namespace-scoped scalar parameters with qualified names.
+float _PathTracingSubsurfaceRayBias;
+#if defined(ILLUSION_HDRP_ENABLE_SSS)
+#include "SkinSampling.hlsl"
+#endif
+
+// @IllusionRP: isolate HDRP helpers from RTXPT helpers with the same names.
+#ifdef FLT_MIN
+#undef FLT_MIN
+#endif
+#define Luminance HDRPLuminance
+namespace Illusion
+{
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+#include "PreIntegratedFGD.cs.hlsl"
+
+Texture2D<float4> _PreIntegratedFGD_GGXDisneyDiffuse;
+SamplerState s_linear_clamp_sampler;
+static float3 g_HDRPViewDirection;
+#if defined(ILLUSION_HDRP_ENABLE_SSS)
+#include "Packages/com.kurisu.illusion-render-pipelines/Shaders/SubsurfaceScattering/ShaderVariablesSubsurface.hlsl"
+#include "SubSurface.hlsl"
+#include "PathTracingSampling.hlsl"
+#endif
+#define _RaytracingSampleIndex g_HDRPSampleIndex
+#define _RayTracingRayBias _PathTracingSubsurfaceRayBias
+
+
+namespace Lit
+{
+#include "Lit.cs.hlsl"
+#include "BuiltinData.cs.hlsl"
+#include "Lit.hlsl"
+
+struct PathPayload
+{
+    float maxRoughness;
+    uint2 pixelCoord;
+    uint segmentID;
+    float rayTHit;
+    float3 value;
+};
+struct AOVData
+{
+    float3 albedo;
+    float3 normal;
+};
+
+#include "PathTracingMaterial.hlsl"
+#define WorldRayDirection() (-g_HDRPViewDirection)
+#define LIT_USE_GGX_ENERGY_COMPENSATION
+#define _SURFACE_TYPE_TRANSPARENT
+#define HAS_REFRACTION 1
+// Standard Lit surfaces carry no subsurface data, so they never scatter below the surface.
+#if defined(ILLUSION_HDRP_ENABLE_SSS) && !defined(PT_STANDARD_LIT)
+#define ILLUSION_PATH_TRACING_SSS
+#define _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
+#endif
+#include "PathTracingBSDF.hlsl"
+#include "LitPathTracing.hlsl"
+#undef _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
+#undef ILLUSION_PATH_TRACING_SSS
+#undef HAS_REFRACTION
+#undef _SURFACE_TYPE_TRANSPARENT
+#undef LIT_USE_GGX_ENERGY_COMPENSATION
+#undef WorldRayDirection
+}
+
+
+}
+#undef Luminance
+#endif

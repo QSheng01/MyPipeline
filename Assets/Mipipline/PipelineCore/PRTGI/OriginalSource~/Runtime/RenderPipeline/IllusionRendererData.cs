@@ -1,0 +1,1171 @@
+﻿using System;
+using System.Collections.Generic;
+using Unity.Collections;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+using Illusion.Rendering.PostProcessing;
+using Illusion.Rendering.Shadows;
+using UnityEngine.Rendering.RenderGraphModule;
+
+namespace Illusion.Rendering
+{
+    public enum ExposureDebugMode
+    {
+        /// <summary>
+        /// No exposure debug.
+        /// </summary>
+        None,
+
+        /// <summary>
+        /// Display the EV100 values of the scene, color-coded.
+        /// </summary>
+        SceneEV100Values,
+
+        /// <summary>
+        /// Display the Histogram used for exposure.
+        /// </summary>
+        HistogramView,
+
+        /// <summary>
+        /// Display an RGB histogram of the final image (after post-processing).
+        /// </summary>
+        FinalImageHistogramView,
+
+        /// <summary>
+        /// Visualize the scene color weighted as the metering mode selected.
+        /// </summary>
+        MeteringWeighted,
+    }
+
+    public enum ScreenSpaceShadowDebugMode
+    {
+        /// <summary>
+        /// Display by renderer settings
+        /// </summary>
+        None,
+        
+        /// <summary>
+        /// Only display main light shadow
+        /// </summary>
+        MainLightShadow,
+        
+        /// <summary>
+        /// Only display contact shadow
+        /// </summary>
+        ContactShadow
+    }
+
+    public enum IndirectDiffuseMode
+    {
+        Off,
+        ScreenSpace,
+        RayTraced,
+        Mixed
+    }
+
+    /// <summary>
+    /// Reasons a camera is not ready for a stable offline capture.
+    /// </summary>
+    [Flags]
+    public enum IllusionTemporalCaptureBlockers
+    {
+        None = 0,
+        NoCameraState = 1 << 0,
+        WarmingUp = 1 << 1,
+        PostProcessingHistoryReset = 1 << 2,
+        TemporalAAHistoryReset = 1 << 3,
+        ScreenSpaceGlobalIlluminationHistory = 1 << 4,
+        ScreenSpaceReflectionHistory = 1 << 5,
+        ScreenSpaceShadowHistory = 1 << 6
+    }
+
+    /// <summary>
+    /// Per-camera temporal history readiness used by screenshot tools that render hidden warmup cameras.
+    /// </summary>
+    public readonly struct IllusionTemporalCaptureStatus
+    {
+        public readonly bool HasCameraState;
+        public readonly uint FrameCount;
+        public readonly int RecommendedWarmupFrames;
+        public readonly bool TemporalAARequested;
+        public readonly bool ScreenSpaceGlobalIlluminationActive;
+        public readonly bool ScreenSpaceReflectionAccumulationActive;
+        public readonly bool ScreenSpaceShadowTemporalActive;
+        public readonly IllusionTemporalCaptureBlockers Blockers;
+
+        public bool IsReady => HasCameraState && Blockers == IllusionTemporalCaptureBlockers.None;
+
+        public IllusionTemporalCaptureStatus(
+            bool hasCameraState,
+            uint frameCount,
+            int recommendedWarmupFrames,
+            bool temporalAARequested,
+            bool screenSpaceGlobalIlluminationActive,
+            bool screenSpaceReflectionAccumulationActive,
+            bool screenSpaceShadowTemporalActive,
+            IllusionTemporalCaptureBlockers blockers)
+        {
+            HasCameraState = hasCameraState;
+            FrameCount = frameCount;
+            RecommendedWarmupFrames = recommendedWarmupFrames;
+            TemporalAARequested = temporalAARequested;
+            ScreenSpaceGlobalIlluminationActive = screenSpaceGlobalIlluminationActive;
+            ScreenSpaceReflectionAccumulationActive = screenSpaceReflectionAccumulationActive;
+            ScreenSpaceShadowTemporalActive = screenSpaceShadowTemporalActive;
+            Blockers = blockers;
+        }
+    }
+
+    public struct DitheredTextureHandleSet
+    {
+        public TextureHandle owenScrambled256Tex;
+        
+        public TextureHandle scramblingTile;
+        
+        public TextureHandle rankingTile;
+        
+        public TextureHandle scramblingTex;
+    }
+
+    public class StencilVRSData : ContextItem 
+    {
+        public TextureHandle ShadingRateColorMask;
+        
+        public TextureHandle ShadingRateImage;
+
+        public override void Reset()
+        {
+            ShadingRateColorMask = TextureHandle.nullHandle;
+            ShadingRateImage = TextureHandle.nullHandle;
+        }
+    }   
+
+    public class TransparentDepthData : ContextItem
+    {
+        public TextureHandle PreDepthTexture;
+
+        public TextureHandle PostDepthTexture;
+
+        public override void Reset()
+        {
+            PreDepthTexture = TextureHandle.nullHandle;
+            PostDepthTexture = TextureHandle.nullHandle;
+        }
+    }
+    
+    /// <summary>
+    /// IllusionRP renderer shared data
+    /// </summary>
+    public partial class IllusionRendererData : IDisposable
+    {
+        internal readonly struct CustomHistoryAllocator
+        {
+            private readonly Vector2 _scaleFactor;
+
+            private readonly GraphicsFormat _format;
+
+            private readonly string _name;
+
+            public CustomHistoryAllocator(Vector2 scaleFactor, GraphicsFormat format, string name)
+            {
+                _scaleFactor = scaleFactor;
+                _format = format;
+                _name = name;
+            }
+
+            public RTHandle Allocator(string id, int frameIndex, RTHandleSystem rtHandleSystem)
+            {
+                return rtHandleSystem.Alloc(Vector2.one * _scaleFactor,
+                    // TextureXR.slices, 
+                    filterMode: FilterMode.Point,
+                    colorFormat: _format,
+                    // dimension: TextureXR.dimension, 
+                    // useDynamicScale: true, 
+                    enableRandomWrite: true,
+                    name: $"{id}_{_name}_{frameIndex}");
+            }
+        }
+
+        public readonly IllusionRenderPipelineResources RuntimeResources;
+
+        public readonly PreIntegratedFGD PreIntegratedFGD;
+
+        public PackedMipChainInfo DepthMipChainInfo;
+
+        public Vector2Int DepthMipChainSize => DepthMipChainInfo.textureSize;
+
+        public int ColorPyramidHistoryMipCount
+        {
+            get => _currentCameraState?.ColorPyramidHistoryMipCount ?? 1;
+            internal set
+            {
+                if (_currentCameraState != null)
+                    _currentCameraState.ColorPyramidHistoryMipCount = value;
+            }
+        }
+
+        public readonly GPUCopy GPUCopy;
+
+        public readonly ComputeBuffer DepthPyramidMipLevelOffsetsBuffer;
+
+        // Not support VR yet
+        public const int MaxViewCount = 1;
+
+        public RTHandle ContactShadowsRT;
+
+        public RTHandle ContactShadowsDenoisedRT;
+
+        public RTHandle ScreenSpaceShadowsRT;
+
+        /// <summary>
+        /// Color texture before post-processing of previous frame
+        /// </summary>
+        public RTHandle CameraPreviousColorTextureRT;
+
+        /// <summary>
+        /// Forward rendering path thin gbuffer
+        /// </summary>
+        public RTHandle ForwardGBufferRT;
+
+        /// <summary>
+        /// Depth pyramid of current frame
+        /// </summary>
+        public RTHandle DepthPyramidRT;
+
+        /// <summary>
+        /// Opaque scene color for screen-space refraction.
+        /// </summary>
+        public RTHandle PreRefractionColorRT;
+
+        /// <summary>
+        /// Normal and smoothness texture for water surface screen space reflections.
+        /// </summary>
+        public RTHandle WaterSSRNormalRT;
+
+        /// <summary>
+        /// Get renderer camera <see cref="UniversalAdditionalCameraData"/>.
+        /// </summary>
+        public UniversalAdditionalCameraData AdditionalCameraData => _additionalCameraData;
+
+        public TextureHandle ScreenSpaceReflectionTexture;
+
+        public TextureHandle TransparentScreenSpaceReflectionTexture;
+
+        public TextureHandle RayTracedGIDebugTexture;
+
+        /// <summary>
+        /// Get current camera frame count.
+        /// </summary>
+        public uint FrameCount => _currentCameraState?.FrameCount ?? 0;
+
+        /// <summary>
+        /// Renderer requires a history color buffer.
+        /// </summary>
+        public bool RequireHistoryColor { get; internal set; }
+
+        /// <summary>
+        /// Prefer using Compute Shader in render passes.
+        /// </summary>
+        public bool PreferComputeShader { get; internal set; }
+
+        /// <summary>
+        /// Number of Unity world units represented by one logical world unit.
+        /// </summary>
+        internal float WorldScale { get; set; } = 1.0f;
+
+        internal float InverseWorldScale => 1.0f / WorldScale;
+
+        internal float ScaleWorldDistance(float logicalDistance)
+        {
+            return logicalDistance * WorldScale;
+        }
+
+        internal float ScaleInverseWorldDistance(float logicalInverseDistance)
+        {
+            return logicalInverseDistance * InverseWorldScale;
+        }
+
+        internal float ScaleSquaredWorldDistance(float logicalSquaredDistance)
+        {
+            return logicalSquaredDistance * WorldScale * WorldScale;
+        }
+
+        /// <summary>
+        /// Get whether the renderer can sample probe volumes (PRTGI).
+        /// </summary>
+        public bool SampleProbeVolumes { get; internal set; } = true;
+        
+        /// <summary>
+        /// Get whether the renderer can sample screen space indirect diffuse texture.
+        /// </summary>
+        public bool SampleScreenSpaceIndirectDiffuse { get; internal set; } = true;
+
+        /// <summary>
+        /// Get whether the renderer samples the ray traced indirect diffuse texture.
+        /// </summary>
+        public bool SampleRayTracedIndirectDiffuse { get; internal set; }
+        
+        /// <summary>
+        /// Get whether the renderer can sample screen space reflection texture.
+        /// </summary>
+        public bool SampleScreenSpaceReflection { get; internal set; } = true;
+
+        /// <summary>
+        /// Get whether the renderer can sample screen space reflections for transparent surfaces.
+        /// </summary>
+        public bool SampleTransparentScreenSpaceReflection { get; internal set; }
+        
+        /// <summary>
+        /// Whether the renderer should copy depth and normal texture for next frame usage.
+        /// </summary>
+        public bool RequireHistoryDepthNormal { get; internal set; }
+        
+        /// <summary>
+        /// Whether the renderer use main light rendering layers to control indirect diffuse intensity.
+        /// </summary>
+        public bool EnableIndirectDiffuseRenderingLayers { get; internal set; }
+
+        public bool IsFirstFrame => _currentCameraState == null || _currentCameraState.IsFirstFrame;
+
+        public bool ResetPostProcessingHistory
+        {
+            get => _currentCameraState == null || _currentCameraState.ResetPostProcessingHistory;
+            internal set
+            {
+                if (_currentCameraState != null)
+                    _currentCameraState.ResetPostProcessingHistory = value;
+            }
+        }
+
+        public bool DidResetPostProcessingHistoryInLastFrame
+        {
+            get => _currentCameraState != null && _currentCameraState.DidResetPostProcessingHistoryInLastFrame;
+            internal set
+            {
+                if (_currentCameraState != null)
+                    _currentCameraState.DidResetPostProcessingHistoryInLastFrame = value;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if lighting is active for current state of debug settings.
+        /// </summary>
+        public bool IsLightingActive { get; private set; }
+        
+        public bool ContactShadowsSampling { get; internal set; }
+        
+        public bool PCSSShadowSampling { get; internal set; }
+
+        public uint PerObjectShadowRenderingLayer { get; internal set; }
+
+        public bool AdditionalDirectionalPerObjectShadows { get; internal set; }
+
+        public MipGenerator MipGenerator { get; }
+
+        public const int ShadowCascadeCount = 4;
+
+        internal readonly ShadowReceiverData ShadowData = new();
+        
+        public RTHandle DebugExposureTexture;
+
+        public ComputeBuffer DebugImageHistogram;
+
+        public ComputeBuffer HistogramBuffer;
+
+        public static IllusionRendererData Active { get; private set; }
+
+        internal ref SsgiHistoryState CurrentSsgiHistoryState => ref _currentCameraState.SsgiHistory;
+
+        internal ref ScreenSpaceShadowTemporalState CurrentScreenSpaceShadowTemporalState =>
+            ref _currentCameraState.ScreenSpaceShadowTemporal;
+
+        internal PerObjectShadowAtlasState CurrentPerObjectShadowAtlasState =>
+            _currentCameraState.PerObjectShadowAtlas;
+
+        internal ref ScreenSpaceReflectionHistoryState CurrentScreenSpaceReflectionHistoryState =>
+            ref _currentCameraState.ScreenSpaceReflection;
+
+        private UniversalAdditionalCameraData _additionalCameraData;
+
+        private const int StaleCameraStateFrameThreshold = 600;
+
+        // These pass-owned flags expose only the readiness bits needed by capture tools.
+        // Persistent history fields remain owned by each feature pass.
+        internal struct SsgiHistoryState
+        {
+            public float HistoryResolutionScale0;
+            public float HistoryResolutionScale1;
+            public bool HasHistory0State;
+            public bool HasHistory1State;
+            public uint LastHistory0FrameCount;
+            public uint LastHistory1FrameCount;
+            public bool ActiveThisFrame;
+            public bool DenoiseActiveThisFrame;
+            public bool SecondHistoryActiveThisFrame;
+            public bool History0ValidThisFrame;
+            public bool History1ValidThisFrame;
+        }
+
+        internal struct ScreenSpaceShadowTemporalState
+        {
+            public bool HasDirectionalHistoryState;
+            public Vector3 LastMainLightDirection;
+            public PerObjectShadowLightMode LastPerObjectShadowMode;
+            public int LastPerObjectLightId;
+            public Vector3 LastPerObjectLightDirection;
+            public uint LastHistoryFrameCount;
+            public bool ActiveThisFrame;
+            public bool HistoryValidThisFrame;
+        }
+
+        internal struct ScreenSpaceReflectionHistoryState
+        {
+            public float AccumulationResolutionScale;
+            public ScreenSpaceReflectionAlgorithm CurrentAlgorithm;
+            public bool ActiveThisFrame;
+            public bool AccumulationActiveThisFrame;
+            public bool HistoryValidThisFrame;
+            public bool HistoryReallocatedThisFrame;
+        }
+
+        internal sealed class PerObjectShadowAtlasState
+        {
+            private const int ResolutionDownFrameThreshold = 8;
+            private const uint StaleCasterFrameThreshold = 60;
+
+            private struct CasterResolutionState
+            {
+                public int Resolution;
+                public int FramesBelowThreshold;
+                public uint LastSeenFrame;
+            }
+
+            private readonly Dictionary<int, CasterResolutionState> _casterResolutions = new();
+            private readonly List<int> _staleCasterIds = new();
+            private ulong _allocationSignature;
+            private bool _hasAllocationSignature;
+
+            public bool AllocationChangedThisFrame { get; private set; }
+
+            public void BeginFrame()
+            {
+                AllocationChangedThisFrame = false;
+            }
+
+            public int ResolveTileResolution(int casterId, int idealResolution, int maximumResolution,
+                uint frameCount)
+            {
+                idealResolution = Mathf.Min(idealResolution, maximumResolution);
+                if (!_casterResolutions.TryGetValue(casterId, out CasterResolutionState state))
+                {
+                    state.Resolution = idealResolution;
+                }
+                else if (state.Resolution > maximumResolution)
+                {
+                    state.Resolution = maximumResolution;
+                    state.FramesBelowThreshold = 0;
+                }
+                else if (idealResolution > state.Resolution)
+                {
+                    state.Resolution = idealResolution;
+                    state.FramesBelowThreshold = 0;
+                }
+                else if (idealResolution < state.Resolution)
+                {
+                    state.FramesBelowThreshold++;
+                    if (state.FramesBelowThreshold >= ResolutionDownFrameThreshold)
+                    {
+                        state.Resolution = Mathf.Max(idealResolution, GetLowerResolution(state.Resolution));
+                        state.FramesBelowThreshold = 0;
+                    }
+                }
+                else
+                {
+                    state.FramesBelowThreshold = 0;
+                }
+
+                state.LastSeenFrame = frameCount;
+                _casterResolutions[casterId] = state;
+                return state.Resolution;
+            }
+
+            public void ForceTileResolution(int casterId, int resolution, uint frameCount)
+            {
+                _casterResolutions[casterId] = new CasterResolutionState
+                {
+                    Resolution = resolution,
+                    FramesBelowThreshold = 0,
+                    LastSeenFrame = frameCount
+                };
+            }
+
+            public void Prune(uint frameCount)
+            {
+                _staleCasterIds.Clear();
+                foreach (KeyValuePair<int, CasterResolutionState> pair in _casterResolutions)
+                {
+                    if (frameCount - pair.Value.LastSeenFrame > StaleCasterFrameThreshold)
+                    {
+                        _staleCasterIds.Add(pair.Key);
+                    }
+                }
+
+                foreach (int casterId in _staleCasterIds)
+                {
+                    _casterResolutions.Remove(casterId);
+                }
+            }
+
+            public void UpdateAllocationSignature(ulong signature)
+            {
+                AllocationChangedThisFrame = _hasAllocationSignature && _allocationSignature != signature;
+                _allocationSignature = signature;
+                _hasAllocationSignature = true;
+            }
+
+            private static int GetLowerResolution(int resolution)
+            {
+                if (resolution > 3072) return 3072;
+                if (resolution > 2048) return 2048;
+                if (resolution > 1536) return 1536;
+                if (resolution > 1280) return 1280;
+                if (resolution > 1024) return 1024;
+                if (resolution > 512) return 512;
+                return 256;
+            }
+        }
+
+        private sealed class CameraRenderState
+        {
+            public readonly BufferedRTHandleSystem HistoryRTSystem = new();
+            public ExposureTextures ExposureTextures;
+            public uint FrameCount;
+            public bool IsFirstFrame = true;
+            public bool ResetPostProcessingHistory = true;
+            public bool DidResetPostProcessingHistoryInLastFrame;
+            public int TaaFrameIndex;
+            public Matrix4x4 PreviousInvViewProjMatrix;
+            public int ColorPyramidHistoryMipCount = 1;
+            public int LastUsedFrame;
+            public SsgiHistoryState SsgiHistory;
+            public ScreenSpaceShadowTemporalState ScreenSpaceShadowTemporal;
+            public readonly PerObjectShadowAtlasState PerObjectShadowAtlas = new();
+            public ScreenSpaceReflectionHistoryState ScreenSpaceReflection =
+                new ScreenSpaceReflectionHistoryState { CurrentAlgorithm = ScreenSpaceReflectionAlgorithm.Approximation };
+
+            public void BeginFrame()
+            {
+                // Reset per-frame capture readiness; history lifetime and reprojection state are preserved.
+                SsgiHistory.ActiveThisFrame = false;
+                SsgiHistory.DenoiseActiveThisFrame = false;
+                SsgiHistory.SecondHistoryActiveThisFrame = false;
+                SsgiHistory.History0ValidThisFrame = false;
+                SsgiHistory.History1ValidThisFrame = false;
+
+                ScreenSpaceShadowTemporal.ActiveThisFrame = false;
+                ScreenSpaceShadowTemporal.HistoryValidThisFrame = false;
+                PerObjectShadowAtlas.BeginFrame();
+
+                ScreenSpaceReflection.ActiveThisFrame = false;
+                ScreenSpaceReflection.AccumulationActiveThisFrame = false;
+                ScreenSpaceReflection.HistoryValidThisFrame = false;
+                ScreenSpaceReflection.HistoryReallocatedThisFrame = false;
+            }
+
+            public void Dispose()
+            {
+                HistoryRTSystem.Dispose();
+            }
+        }
+
+        private readonly Dictionary<Camera, CameraRenderState> _cameraStates = new();
+
+        private readonly List<Camera> _staleCameraStateKeys = new();
+
+        private CameraRenderState _currentCameraState;
+
+        private Camera _camera;
+
+        private Exposure _exposure;
+
+        private readonly RTHandle _emptyExposureTexture; // RGFloat
+
+        private readonly RTHandle _debugExposureData;
+        
+        private RTHandle _whiteTextureRTHandle;
+        
+        private RTHandle _blackTextureRTHandle;
+        
+        private RTHandle _grayTextureRTHandle;
+
+        private const GraphicsFormat ExposureFormat = GraphicsFormat.R32G32_SFloat;
+
+        private ComputeBuffer _ambientProbeBuffer;
+
+        private struct ShaderVariablesGlobal
+        {
+            public Matrix4x4 ViewMatrix;
+            public Matrix4x4 ViewProjMatrix;
+            public Matrix4x4 InvProjMatrix;
+            public Matrix4x4 InvViewProjMatrix;
+            public Matrix4x4 PrevInvViewProjMatrix;
+
+#if !UNITY_2023_1_OR_NEWER
+            public Vector4 RTHandleScale;
+#endif
+            public Vector4 RTHandleScaleHistory;
+
+            // TAA Frame Index ranges from 0 to 7.
+            public Vector4 TaaFrameInfo;  // { unused, frameCount, taaFrameIndex, taaEnabled ? 1 : 0 }
+
+            public Vector4 ColorPyramidUvScaleAndLimitPrevFrame;
+
+            public Vector4 WorldScaleParams; // { worldScale, inverseWorldScale, worldScaleSquared, inverseWorldScaleSquared }
+
+            public float MicroShadowOpacity;
+            public int IndirectDiffuseMode;
+            public float IndirectDiffuseLightingMultiplier;
+            public uint IndirectDiffuseLightingLayers;
+        }
+
+        private ShaderVariablesGlobal _shaderVariablesGlobal;
+
+        public IllusionRendererData(IllusionRenderPipelineResources renderPipelineResources)
+        {
+            RuntimeResources = renderPipelineResources;
+            GPUCopy = new GPUCopy(renderPipelineResources.copyChannelCS);
+            DepthMipChainInfo = new PackedMipChainInfo();
+            DepthMipChainInfo.Allocate();
+            PreIntegratedFGD = new PreIntegratedFGD(renderPipelineResources);
+            DepthPyramidMipLevelOffsetsBuffer = new ComputeBuffer(15, sizeof(int) * 2);
+            MipGenerator = new MipGenerator(this);
+            // Do not clear this texture in the renderer feature constructor. A constructor-time
+            // Graphics.Blit can run in scenes without cameras and disturb Overlay Canvas sizing.
+            _emptyExposureTexture = RTHandles.Alloc(1, 1, colorFormat: ExposureFormat,
+                enableRandomWrite: true, name: "Empty EV100 Exposure");
+
+            _debugExposureData = RTHandles.Alloc(1, 1, colorFormat: ExposureFormat,
+                enableRandomWrite: true, name: "Debug Exposure Info");
+
+            _ditheredTextureSet1SPP = new DitheredTextureSet
+            {
+                owenScrambled256Tex = RTHandles.Alloc(renderPipelineResources.owenScrambled256Tex),
+                scramblingTile      = RTHandles.Alloc(renderPipelineResources.scramblingTile1SPP),
+                rankingTile         = RTHandles.Alloc(renderPipelineResources.rankingTile1SPP),
+                scramblingTex       = RTHandles.Alloc(renderPipelineResources.scramblingTex)
+            };
+        }
+
+        public void Update(UniversalCameraData cameraData, UniversalLightData lightData, UniversalShadowData shadowData)
+        {
+            Active = this;
+            UpdateCameraData(cameraData);
+            _currentCameraState = GetOrCreateCameraState(_camera);
+            _currentCameraState.FrameCount++;
+            _currentCameraState.BeginFrame();
+            _currentCameraState.IsFirstFrame = false;
+            PruneStaleCameraStates();
+            UpdateRenderTextures(cameraData);
+            UpdateDebugSettings(cameraData);
+            UpdateVolumeParameters();
+        }
+
+        public void Dispose()
+        {
+            if (Active == this)
+            {
+                Active = null;
+            }
+
+            MipGenerator.Release();
+            foreach (var cameraState in _cameraStates.Values)
+            {
+                cameraState.Dispose();
+            }
+            _cameraStates.Clear();
+            _staleCameraStateKeys.Clear();
+            _currentCameraState = null;
+            CameraPreviousColorTextureRT?.Release();
+            DepthPyramidMipLevelOffsetsBuffer?.Release();
+            ScreenSpaceShadowsRT?.Release();
+            ContactShadowsRT?.Release();
+            ContactShadowsDenoisedRT?.Release();
+            ForwardGBufferRT?.Release();
+            DebugExposureTexture?.Release();
+            DepthPyramidRT?.Release();
+            PreRefractionColorRT?.Release();
+            WaterSSRNormalRT?.Release();
+            CoreUtils.SafeRelease(HistogramBuffer);
+            HistogramBuffer = null;
+            CoreUtils.SafeRelease(_ambientProbeBuffer);
+            _ambientProbeBuffer = null;
+            CoreUtils.SafeRelease(DebugImageHistogram);
+            DebugImageHistogram = null;
+            RTHandles.Release(_emptyExposureTexture);
+            RTHandles.Release(_debugExposureData);
+            
+            // Release default texture RTHandle wrappers
+            RTHandles.Release(_whiteTextureRTHandle);
+            RTHandles.Release(_blackTextureRTHandle);
+            RTHandles.Release(_grayTextureRTHandle);
+            _whiteTextureRTHandle = null;
+            _blackTextureRTHandle = null;
+            _grayTextureRTHandle = null;
+        }
+
+        internal void PushGlobalBuffers(RasterCommandBuffer cmd, UniversalCameraData cameraData, UniversalLightData lightData, bool yFlip)
+        {
+            PrepareGlobalVariables(cameraData, lightData, yFlip);
+            ConstantBuffer.PushGlobal(cmd, _shaderVariablesGlobal, IllusionShaderProperties.ShaderVariablesGlobal);
+        }
+
+        private void PrepareGlobalVariables(UniversalCameraData cameraData, UniversalLightData lightData,  bool yFlip)
+        {
+            bool useTAA = cameraData.IsTemporalAAEnabled(); // Disable in scene view
+            var cameraState = _currentCameraState;
+            var historyRTSystem = cameraState.HistoryRTSystem;
+            
+            // Match HDRP View Projection Matrix, pre-handle reverse z.
+            _shaderVariablesGlobal.ViewMatrix = cameraData.camera.worldToCameraMatrix;
+            _shaderVariablesGlobal.ViewProjMatrix = IllusionRenderingUtils.CalculateViewProjMatrix(cameraData, yFlip);
+            _shaderVariablesGlobal.InvProjMatrix = cameraData.GetGPUProjectionMatrix(true).inverse;
+            _shaderVariablesGlobal.InvViewProjMatrix = _shaderVariablesGlobal.ViewProjMatrix.inverse;
+            _shaderVariablesGlobal.PrevInvViewProjMatrix = FrameCount <= 1 || ResetPostProcessingHistory
+                ? _shaderVariablesGlobal.InvViewProjMatrix
+                : cameraState.PreviousInvViewProjMatrix;
+            cameraState.PreviousInvViewProjMatrix = _shaderVariablesGlobal.InvViewProjMatrix;
+
+            // No RTHandleScale in IllusionRP
+            // _shaderVariablesGlobal.RTHandleScale = RTHandles.rtHandleProperties.rtHandleScale;
+            // _shaderVariablesGlobal.RTHandleScaleHistory = historyRTSystem.rtHandleProperties.rtHandleScale;
+#if !UNITY_2023_1_OR_NEWER
+            _shaderVariablesGlobal.RTHandleScale = Vector4.one;
+#endif
+            _shaderVariablesGlobal.RTHandleScaleHistory = Vector4.one;
+
+            const int kMaxSampleCount = 8;
+            if (++cameraState.TaaFrameIndex >= kMaxSampleCount)
+                cameraState.TaaFrameIndex = 0;
+            _shaderVariablesGlobal.TaaFrameInfo = new Vector4(0, FrameCount, cameraState.TaaFrameIndex, useTAA ? 1 : 0);
+            _shaderVariablesGlobal.ColorPyramidUvScaleAndLimitPrevFrame
+                = IllusionRenderingUtils.ComputeViewportScaleAndLimit(historyRTSystem.rtHandleProperties.previousViewportSize,
+                    historyRTSystem.rtHandleProperties.previousRenderTargetSize);
+            _shaderVariablesGlobal.WorldScaleParams = new Vector4(WorldScale, InverseWorldScale,
+                WorldScale * WorldScale, InverseWorldScale * InverseWorldScale);
+            
+            MicroShadows microShadowingSettings = VolumeManager.instance.stack.GetComponent<MicroShadows>();
+            _shaderVariablesGlobal.MicroShadowOpacity = microShadowingSettings.enable.value ? microShadowingSettings.opacity.value : 0.0f;
+            
+            GetMainLightIndirectIntensityAndRenderingLayers(lightData, out float intensity, out uint layers);
+            if (!EnableIndirectDiffuseRenderingLayers)
+            {
+                layers = ~(uint)0;
+            }
+            _shaderVariablesGlobal.IndirectDiffuseMode = (int)GetIndirectDiffuseMode();
+            _shaderVariablesGlobal.IndirectDiffuseLightingMultiplier = intensity;
+            _shaderVariablesGlobal.IndirectDiffuseLightingLayers = layers;
+        }
+
+        private void GetMainLightIndirectIntensityAndRenderingLayers(UniversalLightData lightData,
+            out float intensity, out uint renderingLayers)
+        {
+            intensity = 1.0f;
+            renderingLayers = 0;
+            int mainLightIndex = lightData.mainLightIndex;
+            if (mainLightIndex < 0) return; // No main light
+            VisibleLight mainLight = lightData.visibleLights[mainLightIndex];
+            Light light = mainLight.light;
+            if (!light) return;
+
+            intensity = light.bounceIntensity;
+            renderingLayers = light.TryGetComponent(out UniversalAdditionalLightData additionalLightData)
+                ? additionalLightData.renderingLayers
+                : unchecked((uint)light.renderingLayerMask);
+        }
+
+        private void UpdateDebugSettings(UniversalCameraData cameraData)
+        {
+            var renderer = cameraData.renderer;
+            if (renderer.DebugHandler != null && !cameraData.isPreviewCamera)
+            {
+                IsLightingActive = renderer.DebugHandler.IsLightingActive;
+            }
+            else
+            {
+                IsLightingActive = true;
+            }
+        }
+
+        private void UpdateRenderTextures(UniversalCameraData cameraData)
+        {
+            var descriptor = cameraData.cameraTargetDescriptor;
+            var viewportSize = new Vector2Int(descriptor.width, descriptor.height);
+            var historyRTSystem = _currentCameraState.HistoryRTSystem;
+            historyRTSystem.SwapAndSetReferenceSize(descriptor.width, descriptor.height);
+
+            // Since we do not use RTHandleScale, ensure render texture size correct
+            if (historyRTSystem.rtHandleProperties.currentRenderTargetSize.x > descriptor.width
+                || historyRTSystem.rtHandleProperties.currentRenderTargetSize.y > descriptor.height)
+            {
+                historyRTSystem.ResetReferenceSize(descriptor.width, descriptor.height);
+                _currentCameraState.ExposureTextures.Clear();
+            }
+
+            DepthMipChainInfo.ComputePackedMipChainInfo(viewportSize, 0);
+            
+            SetupExposureTextures();
+        }
+
+        private void UpdateVolumeParameters()
+        {
+            _exposure = VolumeManager.instance.stack.GetComponent<Exposure>();
+            // Update info about current target mid gray
+            TargetMidGray requestedMidGray = _exposure.targetMidGray.value;
+            switch (requestedMidGray)
+            {
+                case TargetMidGray.Grey125:
+                    ColorUtils.s_LightMeterCalibrationConstant = 12.5f;
+                    break;
+                case TargetMidGray.Grey14:
+                    ColorUtils.s_LightMeterCalibrationConstant = 14.0f;
+                    break;
+                case TargetMidGray.Grey18:
+                    ColorUtils.s_LightMeterCalibrationConstant = 18.0f;
+                    break;
+                default:
+                    ColorUtils.s_LightMeterCalibrationConstant = 12.5f;
+                    break;
+            }
+        }
+
+        private void UpdateCameraData(UniversalCameraData cameraData)
+        {
+            _camera = cameraData.camera;
+            _camera.TryGetComponent(out _additionalCameraData);
+        }
+
+        private CameraRenderState GetOrCreateCameraState(Camera camera)
+        {
+            if (!_cameraStates.TryGetValue(camera, out var cameraState))
+            {
+                cameraState = new CameraRenderState();
+                _cameraStates.Add(camera, cameraState);
+            }
+
+            cameraState.LastUsedFrame = Time.frameCount;
+            return cameraState;
+        }
+
+        internal void SetColorPyramidHistoryMipCount(Camera camera, int mipCount)
+        {
+            GetOrCreateCameraState(camera).ColorPyramidHistoryMipCount = mipCount;
+        }
+
+        /// <summary>
+        /// Reports whether a camera has enough temporal history for a stable high-resolution capture.
+        /// </summary>
+        /// <remarks>
+        /// External screenshot tools use this to warm up isolated cameras without relying on a fixed delay.
+        /// </remarks>
+        public bool TryGetTemporalCaptureStatus(Camera camera, out IllusionTemporalCaptureStatus status)
+        {
+            if (!camera || !_cameraStates.TryGetValue(camera, out var cameraState))
+            {
+                status = new IllusionTemporalCaptureStatus(
+                    false,
+                    0,
+                    1,
+                    false,
+                    false,
+                    false,
+                    false,
+                    IllusionTemporalCaptureBlockers.NoCameraState);
+                return false;
+            }
+
+            var blockers = IllusionTemporalCaptureBlockers.None;
+            int recommendedWarmupFrames = 1;
+            bool temporalAARequested = false;
+
+            if (camera.TryGetComponent(out UniversalAdditionalCameraData additionalCameraData))
+            {
+                temporalAARequested = additionalCameraData.antialiasing == AntialiasingMode.TemporalAntiAliasing
+                                      && additionalCameraData.renderPostProcessing;
+                if (temporalAARequested)
+                {
+                    recommendedWarmupFrames = Mathf.Max(recommendedWarmupFrames, 8);
+                    if (additionalCameraData.resetHistory)
+                    {
+                        blockers |= IllusionTemporalCaptureBlockers.TemporalAAHistoryReset;
+                    }
+                }
+            }
+
+            if (cameraState.ResetPostProcessingHistory || cameraState.DidResetPostProcessingHistoryInLastFrame)
+            {
+                blockers |= IllusionTemporalCaptureBlockers.PostProcessingHistoryReset;
+            }
+
+            bool ssgiActive = cameraState.SsgiHistory.ActiveThisFrame;
+            if (ssgiActive)
+            {
+                recommendedWarmupFrames = Mathf.Max(recommendedWarmupFrames, 16);
+                bool ssgiReady = !cameraState.SsgiHistory.DenoiseActiveThisFrame
+                                 || (cameraState.SsgiHistory.History0ValidThisFrame
+                                     && (!cameraState.SsgiHistory.SecondHistoryActiveThisFrame
+                                         || cameraState.SsgiHistory.History1ValidThisFrame));
+                if (!ssgiReady)
+                {
+                    blockers |= IllusionTemporalCaptureBlockers.ScreenSpaceGlobalIlluminationHistory;
+                }
+            }
+
+            bool ssrAccumulationActive = cameraState.ScreenSpaceReflection.ActiveThisFrame
+                                         && cameraState.ScreenSpaceReflection.AccumulationActiveThisFrame;
+            if (ssrAccumulationActive)
+            {
+                recommendedWarmupFrames = Mathf.Max(recommendedWarmupFrames, 16);
+                if (!cameraState.ScreenSpaceReflection.HistoryValidThisFrame)
+                {
+                    blockers |= IllusionTemporalCaptureBlockers.ScreenSpaceReflectionHistory;
+                }
+            }
+
+            bool screenSpaceShadowTemporalActive = cameraState.ScreenSpaceShadowTemporal.ActiveThisFrame;
+            if (screenSpaceShadowTemporalActive)
+            {
+                recommendedWarmupFrames = Mathf.Max(recommendedWarmupFrames, 8);
+                if (!cameraState.ScreenSpaceShadowTemporal.HistoryValidThisFrame)
+                {
+                    blockers |= IllusionTemporalCaptureBlockers.ScreenSpaceShadowHistory;
+                }
+            }
+
+            if (cameraState.FrameCount < recommendedWarmupFrames)
+            {
+                blockers |= IllusionTemporalCaptureBlockers.WarmingUp;
+            }
+
+            status = new IllusionTemporalCaptureStatus(
+                true,
+                cameraState.FrameCount,
+                recommendedWarmupFrames,
+                temporalAARequested,
+                ssgiActive,
+                ssrAccumulationActive,
+                screenSpaceShadowTemporalActive,
+                blockers);
+            return true;
+        }
+
+        private void PruneStaleCameraStates()
+        {
+            _staleCameraStateKeys.Clear();
+            foreach (var pair in _cameraStates)
+            {
+                if (pair.Value == _currentCameraState)
+                    continue;
+
+                if (pair.Key == null || Time.frameCount - pair.Value.LastUsedFrame > StaleCameraStateFrameThreshold)
+                    _staleCameraStateKeys.Add(pair.Key);
+            }
+
+            foreach (var key in _staleCameraStateKeys)
+            {
+                if (_cameraStates.TryGetValue(key, out var cameraState))
+                    cameraState.Dispose();
+
+                _cameraStates.Remove(key);
+            }
+        }
+
+        internal void BindAmbientProbe(RasterCommandBuffer cmd)
+        {
+            SphericalHarmonicsL2 ambientProbe = RenderSettings.ambientProbe;
+            _ambientProbeBuffer ??= new ComputeBuffer(7, 16);
+            var array = new NativeArray<Vector4>(7, Allocator.Temp);
+            array[0] = new Vector4(ambientProbe[0, 3], ambientProbe[0, 1], ambientProbe[0, 2], ambientProbe[0, 0] - ambientProbe[0, 6]);
+            array[1] = new Vector4(ambientProbe[1, 3], ambientProbe[1, 1], ambientProbe[1, 2], ambientProbe[1, 0] - ambientProbe[1, 6]);
+            array[2] = new Vector4(ambientProbe[2, 3], ambientProbe[2, 1], ambientProbe[2, 2], ambientProbe[2, 0] - ambientProbe[2, 6]);
+            array[3] = new Vector4(ambientProbe[0, 4], ambientProbe[0, 5], ambientProbe[0, 6] * 3, ambientProbe[0, 7]);
+            array[4] = new Vector4(ambientProbe[1, 4], ambientProbe[1, 5], ambientProbe[1, 6] * 3, ambientProbe[1, 7]);
+            array[5] = new Vector4(ambientProbe[2, 4], ambientProbe[2, 5], ambientProbe[2, 6] * 3, ambientProbe[2, 7]);
+            array[6] = new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1);
+            _ambientProbeBuffer.SetData(array);
+            array.Dispose();
+            cmd.SetGlobalBuffer(IllusionShaderProperties._AmbientProbeData, _ambientProbeBuffer);
+        }
+        
+        private struct DitheredTextureSet
+        {
+            public RTHandle owenScrambled256Tex;
+            public RTHandle scramblingTile;
+            public RTHandle rankingTile;
+            public RTHandle scramblingTex;
+        }
+
+        private readonly DitheredTextureSet _ditheredTextureSet1SPP;
+        
+        public DitheredTextureHandleSet DitheredTextureHandleSet1SPP { get; private set; }
+        
+        public void BindDitheredRNGData1SPP(CommandBuffer cmd)
+        {
+            cmd.SetGlobalTexture(IllusionShaderProperties._OwenScrambledTexture, RuntimeResources.owenScrambled256Tex);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTileXSPP, RuntimeResources.scramblingTile1SPP);
+            cmd.SetGlobalTexture(IllusionShaderProperties._RankingTileXSPP, RuntimeResources.rankingTile1SPP);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTexture, RuntimeResources.scramblingTex);
+        }
+        
+        internal static void BindDitheredTextureSet(ComputeCommandBuffer cmd, DitheredTextureHandleSet ditheredTextureSet)
+        {
+            cmd.SetGlobalTexture(IllusionShaderProperties._OwenScrambledTexture, ditheredTextureSet.owenScrambled256Tex);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTileXSPP, ditheredTextureSet.scramblingTile);
+            cmd.SetGlobalTexture(IllusionShaderProperties._RankingTileXSPP, ditheredTextureSet.rankingTile);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTexture, ditheredTextureSet.scramblingTex);
+        }
+        
+        internal static void BindDitheredTextureSet(RasterCommandBuffer cmd, DitheredTextureHandleSet ditheredTextureSet)
+        {
+            cmd.SetGlobalTexture(IllusionShaderProperties._OwenScrambledTexture, ditheredTextureSet.owenScrambled256Tex);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTileXSPP, ditheredTextureSet.scramblingTile);
+            cmd.SetGlobalTexture(IllusionShaderProperties._RankingTileXSPP, ditheredTextureSet.rankingTile);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTexture, ditheredTextureSet.scramblingTex);
+        }
+        
+        public void BindDitheredRNGData1SPP(RenderGraph renderGraph)
+        {
+            var set = new DitheredTextureHandleSet
+            {
+                owenScrambled256Tex = renderGraph.ImportTexture(_ditheredTextureSet1SPP.owenScrambled256Tex),
+                scramblingTile = renderGraph.ImportTexture(_ditheredTextureSet1SPP.scramblingTile),
+                rankingTile = renderGraph.ImportTexture(_ditheredTextureSet1SPP.rankingTile),
+                scramblingTex = renderGraph.ImportTexture(_ditheredTextureSet1SPP.scramblingTex)
+            };
+            DitheredTextureHandleSet1SPP = set;
+        }
+        
+        public void BindDitheredRNGData8SPP(CommandBuffer cmd)
+        {
+            cmd.SetGlobalTexture(IllusionShaderProperties._OwenScrambledTexture, RuntimeResources.owenScrambled256Tex);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTileXSPP, RuntimeResources.scramblingTile8SPP);
+            cmd.SetGlobalTexture(IllusionShaderProperties._RankingTileXSPP, RuntimeResources.rankingTile8SPP);
+            cmd.SetGlobalTexture(IllusionShaderProperties._ScramblingTexture, RuntimeResources.scramblingTex);
+        }
+
+        public Vector4 EvaluateRayTracingHistorySizeAndScale(RTHandle buffer)
+        {
+            if (_currentCameraState == null || buffer?.rt == null)
+                return Vector4.one;
+
+            var properties = _currentCameraState.HistoryRTSystem.rtHandleProperties;
+            return new Vector4(properties.previousViewportSize.x,
+                properties.previousViewportSize.y,
+                (float)properties.previousViewportSize.x / buffer.rt.width,
+                (float)properties.previousViewportSize.y / buffer.rt.height);
+        }
+
+        /// <summary>
+        /// Allocates a history RTHandle with the unique identifier id.
+        /// </summary>
+        /// <param name="id">Unique id for this history buffer.</param>
+        /// <param name="allocator">Allocator function for the history RTHandle.</param>
+        /// <param name="bufferCount">Number of buffer that should be allocated.</param>
+        /// <returns>A new RTHandle.</returns>
+        public RTHandle AllocHistoryFrameRT(int id, Func<string, int, RTHandleSystem, RTHandle> allocator, int bufferCount)
+        {
+            var historyRTSystem = _currentCameraState.HistoryRTSystem;
+            historyRTSystem.AllocBuffer(id, (rts, i) => allocator(_camera.name, i, rts), bufferCount);
+            return historyRTSystem.GetFrameRT(id, 0);
+        }
+
+        /// <summary>
+        /// Returns the id RTHandle from the previous frame.
+        /// </summary>
+        /// <param name="id">Id of the history RTHandle.</param>
+        /// <returns>The RTHandle from previous frame.</returns>
+        public RTHandle GetPreviousFrameRT(int id)
+        {
+            return _currentCameraState?.HistoryRTSystem.GetFrameRT(id, 1);
+        }
+
+        /// <summary>
+        /// Returns the id RTHandle of the current frame.
+        /// </summary>
+        /// <param name="id">Id of the history RTHandle.</param>
+        /// <returns>The RTHandle of the current frame.</returns>
+        public RTHandle GetCurrentFrameRT(int id)
+        {
+            return _currentCameraState?.HistoryRTSystem.GetFrameRT(id, 0);
+        }
+
+        /// <summary>
+        /// Release a buffer.
+        /// </summary>
+        /// <param name="id"></param>
+        internal void ReleaseHistoryFrameRT(int id)
+        {
+            _currentCameraState?.HistoryRTSystem.ReleaseBuffer(id);
+        }
+
+        /// <summary>
+        /// Get previous frame color buffer if possible
+        /// </summary>
+        /// <param name="frameData"></param>
+        /// <param name="isNewFrame"></param>
+        /// <returns></returns>
+        public RTHandle GetPreviousFrameColorRT(ContextContainer frameData, out bool isNewFrame)
+        {
+            var resource = frameData.Get<UniversalResourceData>();
+            var cameraData = frameData.Get<UniversalCameraData>();
+            // Using color pyramid
+            if (cameraData.cameraType is CameraType.Game or CameraType.SceneView)
+            {
+                var previewsColorRT = GetCurrentFrameRT((int)IllusionFrameHistoryType.ColorBufferMipChain);
+                if (previewsColorRT != null && previewsColorRT.IsValid())
+                {
+                    isNewFrame = true;
+                    return previewsColorRT;
+                }
+            }
+
+            // Using taa accumulation buffer
+            if (cameraData.IsTemporalAAEnabled())
+            {
+                int multipassId = 0;
+#if ENABLE_VR && ENABLE_XR_MODULE
+                multipassId = cameraData.xr.multipassId;
+#endif
+                var taaPersistentData = cameraData.taaHistory;
+                isNewFrame = taaPersistentData.GetAccumulationVersion(multipassId) != Time.frameCount;
+                return taaPersistentData.GetAccumulationTexture(multipassId);
+            }
+
+            // Using history color
+            isNewFrame = true;
+            if (RequireHistoryColor)
+            {
+                return CameraPreviousColorTextureRT;
+            }
+            
+            // Fallback to opaque texture if exists.
+            return resource.cameraOpaqueTexture;
+        }
+
+        private IndirectDiffuseMode GetIndirectDiffuseMode()
+        {
+            if (SampleRayTracedIndirectDiffuse)
+            {
+                return IndirectDiffuseMode.RayTraced;
+            }
+
+            if (SampleScreenSpaceIndirectDiffuse)
+            {
+                return IndirectDiffuseMode.ScreenSpace;
+            }
+
+            return IndirectDiffuseMode.Off;
+        }
+    }
+}

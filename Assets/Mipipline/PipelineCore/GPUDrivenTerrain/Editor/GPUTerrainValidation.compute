@@ -1,0 +1,48 @@
+#pragma kernel Geometry
+#pragma kernel NormalSamples
+#pragma kernel SeamEdges
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "../Shaders/GPUTerrainGeometry.hlsl"
+RWStructuredBuffer<float4> Positions;
+RWStructuredBuffer<float4> Normals;
+StructuredBuffer<uint2> EdgeQueries;
+RWStructuredBuffer<float4> EdgePositions;
+int EdgeQueryCount;
+StructuredBuffer<uint> TestPatchIndices;
+int PatchCount;
+[numthreads(64,1,1)]
+void Geometry(uint3 id:SV_DispatchThreadID)
+{
+    if(id.x >= (uint)(PatchCount*289)) return;
+    uint patch=TestPatchIndices[id.x/289], vertex=id.x%289;
+    float4 position=float4(vertex%17,0,vertex/17,1);
+    float3 normal=0;
+    float2 uv=0;
+    ApplyGPUTerrain(position,normal,uv,patch);
+    Positions[id.x]=position;
+}
+
+[numthreads(8,8,1)]
+void NormalSamples(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy >= 65)) return;
+    float2 uv=id.xy/64.0;
+    Normals[id.y*65+id.x]=float4(GPUTerrainNormal(uv),1);
+}
+
+[numthreads(64,1,1)]
+void SeamEdges(uint3 id:SV_DispatchThreadID)
+{
+    if (id.x >= (uint)(EdgeQueryCount * 17)) return;
+    uint2 query = EdgeQueries[id.x / 17];
+    uint vertex = id.x % 17;
+    float4 position = float4(0, 0, 0, 1);
+    if (query.y == 0) position.z = vertex;
+    else if (query.y == 1) position.x = vertex;
+    else if (query.y == 2) { position.x = 16; position.z = vertex; }
+    else { position.x = vertex; position.z = 16; }
+    float3 normal = 0;
+    float2 uv = 0;
+    ApplyGPUTerrain(position, normal, uv, query.x);
+    EdgePositions[id.x] = position;
+}

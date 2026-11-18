@@ -1,0 +1,173 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 30558_pet_guigui_lv1
+  m_Shader: {fileID: 4800000, guid: 5e86668b977b37a4e80749ba6528f5b4, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _Normal
+  - _USERIM
+  m_InvalidKeywords:
+  - _PBRDIFFUSE
+  - _RECEIVE_SHADOWS_OFF
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: 2000
+  stringTagMap:
+    RenderType: Opaque
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 76e507c57a28347438f8e521d429a25d, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMaskMap:
+        m_Texture: {fileID: 2800000, guid: 4a45d5c846f47b1459b48ee9850e28ec, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EffectMaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EvnCubemap:
+        m_Texture: {fileID: 8900000, guid: 87b1fcabba21f374fae36c032471aa06, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LightMap:
+        m_Texture: {fileID: 2800000, guid: 98e8e0ec678d9ac41b7f280d14e6a78a, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampMap:
+        m_Texture: {fileID: 2800000, guid: 2385bd3ed58206c44866c0ad35768ebc, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaClip: 0
+    - _BaseMapTip: 1
+    - _BaseSetting: 1
+    - _BumpMapTip: 1
+    - _BumpStrength: 1
+    - _Cull: 2
+    - _CustomShadowDepthBias: 0.8
+    - _CustomShadowNormalBias: 0.01
+    - _Cutoff: 0.5
+    - _DiffSoftness: 0.3
+    - _DiffThreshold: 0
+    - _DiffuseSetting: 1
+    - _DstBlend: 0
+    - _EffectFresnelFactor: 1
+    - _EffectFresnelPower: 2
+    - _EffectFresnelSetting: 1
+    - _EffectFresnelSmooth: 1
+    - _EffectFresnelThreshold: 0
+    - _EffectMaskTip: 1
+    - _EmissionInstensity: 0.85
+    - _EmissionSetting: 1
+    - _Emission_ColorWeight: 1
+    - _Emission_Instensity: 0
+    - _EnvBlendAlbedoIntensity: 0.5
+    - _EnvBrightness: 0
+    - _EnvMaskTip: 1
+    - _EnvRotate: 0
+    - _EnvShadingSetting: 1
+    - _HeavyShadowIntensity: 1
+    - _HeavyShadowRange: 0.21
+    - _HeavyShadowSetting: 1
+    - _HeavyShadowSoftness: 0.6
+    - _HitRimFactor: 0
+    - _HitRimPower: 1
+    - _HitRimSmooth: 1
+    - _HitRimThreshold: 0
+    - _HitSetting: 1
+    - _LightMapTip: 1
+    - _MapSetting: 1
+    - _MaskTip: 1
+    - _MaskTip2: 1
+    - _MetaIntensity: 0
+    - _Metallic: 0.5
+    - _Mode: 0
+    - _MultipleLightBlend: 0.5
+    - _MultipleLightIntensity: 2.5
+    - _MultipleLightSetting: 1
+    - _Offset_Z: 0
+    - _OutLineSetting: 0
+    - _OutlineType: 0
+    - _Outline_Width: 1
+    - _PBRDIFFUSE: 1
+    - _RampMapTip: 1
+    - _ReceiveShadowOff: 0
+    - _RimColorBlendAlbedo: 0.25
+    - _RimDepthWidth: 0.01
+    - _RimSetting: 1
+    - _RimThreshold: 0
+    - _SHBrightness: 1
+    - _ShadowColorTip: 1
+    - _ShadowIntensity: 1
+    - _ShadowOffsetTip: 1
+    - _ShadowSetting: 1
+    - _SilkStockingDarkFresnelContrast: 1
+    - _SilkStockingDarkFresnelIntensity: 1
+    - _SilkStockingDarkFresnelRange: 0
+    - _SilkStockingDarkFresnelSoftness: 0.5
+    - _SilkStockingDarkFresnelTip: 1
+    - _SilkStockingDarkSideBrightness: 1
+    - _SilkStockingDarkSideRange: 0
+    - _SilkStockingDarkSideSoftness: 0.5
+    - _SilkStockingDarkSideTip: 1
+    - _SilkStockingRimBrightness: 1
+    - _SilkStockingRimTip: 1
+    - _SilkStockingRimWidth: 0.5
+    - _SilkStockingSkinColorBrightness: 1
+    - _SilkStockingSkinTip: 1
+    - _Smoothness: 1
+    - _SpecSetting: 1
+    - _SpecularBlendAlbedoIntensity: 0.6
+    - _SpecularInstensity: 1
+    - _SpecularIntensity: 1
+    - _SpecularSetting: 1
+    - _SpecularYPosOffset: 0
+    - _SrcBlend: 1
+    - _Surface: 0
+    - _TransparentShadow: 0
+    - _USEOUTLINE: 0
+    - _UseEffectFresnel: 0
+    - _UseShadowMask: 1
+    - _UseSilkStocking: 0
+    - _WholeEmissionColorTip: 1
+    - _ZTest: 4
+    - _ZWrite: 1
+    - _useRim: 1
+    m_Colors:
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EffectFresnelColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EmissionColor: {r: 0.85882354, g: 0.8509804, b: 0.6666667, a: 1}
+    - _EnvColor: {r: 1, g: 1, b: 1, a: 1}
+    - _HeavyShadowColor: {r: 0.9137255, g: 0.72156864, b: 0.7490196, a: 1}
+    - _HitRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _LightShadowColor: {r: 0, g: 0, b: 0, a: 1}
+    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
+    - _RimColor: {r: 0.61960787, g: 0.7176471, b: 1, a: 1}
+    - _ShadowColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _SilkStockingDarkFresnelColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _SilkStockingDarkSideColor: {r: 0.69034, g: 0.06411998, b: 0, a: 1}
+    - _SilkStockingRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SilkStockingSkinColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _WholeEmissionColor: {r: 0, g: 0, b: 0, a: 1}
+  m_BuildTextureStacks: []

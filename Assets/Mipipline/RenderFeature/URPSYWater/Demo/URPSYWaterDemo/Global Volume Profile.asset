@@ -1,0 +1,65 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d7fd9488000d3734a9e00ee676215985, type: 3}
+  m_Name: Global Volume Profile
+  m_EditorClassIdentifier: 
+  components:
+  - {fileID: 2977488147561242079}
+--- !u!114 &2977488147561242079
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a9d564a9729bd174eb65d309462d2f10, type: 3}
+  m_Name: PlanarReflection
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 0
+  quality:
+    m_OverrideState: 0
+    m_Value: 1
+  planarHeight:
+    m_OverrideState: 0
+    m_Value: 50
+  renderSkyBox:
+    m_OverrideState: 0
+    m_Value: 1
+  openBlur:
+    m_OverrideState: 1
+    m_Value: 0
+  SSPREnabled:
+    m_OverrideState: 1
+    m_Value: 1
+  SSPR_renderSkyBox:
+    m_OverrideState: 1
+    m_Value: 1
+  SSPR_renderSkyBox_Qulity:
+    m_OverrideState: 0
+    m_Value: 1
+  ssprquality:
+    m_OverrideState: 0
+    m_Value: 1
+  fadeOutScreenBorderWidthVerticle:
+    m_OverrideState: 1
+    m_Value: 0
+  fadeOutScreenBorderWidthHorizontal:
+    m_OverrideState: 1
+    m_Value: 0
+  blurRadius:
+    m_OverrideState: 0
+    m_Value: 0

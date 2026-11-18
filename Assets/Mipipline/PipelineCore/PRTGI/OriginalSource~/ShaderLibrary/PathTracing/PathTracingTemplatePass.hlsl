@@ -1,0 +1,87 @@
+#ifndef ILLUSION_PATH_TRACING_TEMPLATE_PASS_INCLUDED
+#define ILLUSION_PATH_TRACING_TEMPLATE_PASS_INCLUDED
+
+
+Attributes PathTracingTemplateAttributes(PathTracingHitContext hit)
+{
+    Attributes input = (Attributes)0;
+    input.positionOS = float4(hit.vertex.positionOS, 1.0);
+    input.normalOS = hit.vertex.normalOS;
+    input.tangentOS = hit.vertex.tangentOS;
+    input.texcoord = hit.vertex.texCoord0;
+    input.texcoord1 = hit.vertex.texCoord1;
+    input.texcoord2 = hit.vertex.texCoord2;
+    input.texcoord3 = hit.vertex.texCoord3;
+    input.color = hit.vertex.color;
+    return input;
+}
+
+PATH_TRACING_TEMPLATE_SURFACE PathTracingEvaluateTemplate(AttributeData attributes, IllusionPathPayload payload, bool coverage)
+{
+    if (coverage)
+        g_PathTracingHit = PathTracingGetCoverageContext(attributes, payload);
+    else
+        g_PathTracingHit = PathTracingGetHitContext(attributes, payload);
+    g_PathTracingScreenPosition = PathTracingPseudoScreenPosition(payload);
+    g_PathTracingClipped = false;
+    return frag(vert(PathTracingTemplateAttributes(g_PathTracingHit)));
+}
+
+[shader("closesthit")]
+void PathTracingClosestHit(inout IllusionPathPayload payload : SV_RayPayload, AttributeData attributes : SV_IntersectionAttributes)
+{
+    PATH_TRACING_TEMPLATE_SURFACE surface = PathTracingEvaluateTemplate(attributes, payload, false);
+    PathTracingWriteTemplateSurface(payload, g_PathTracingHit, surface);
+}
+
+#if defined(_SURFACE_TYPE_TRANSPARENT) || defined(_PATH_TRACING_TRANSMISSION_THIN) || defined(_PATH_TRACING_TRANSMISSION_REFRACTIVE)
+#define PATH_TRACING_TRANSMITS_SHADOWS
+#endif
+
+[shader("anyhit")]
+void PathTracingAnyHit(inout IllusionPathPayload payload : SV_RayPayload, AttributeData attributes : SV_IntersectionAttributes)
+{
+    if (!PathTracingAcceptShadowCaster(payload))
+        return;
+#if defined(_ALPHATEST_ON) || defined(PATH_TRACING_TRANSMITS_SHADOWS)
+#if defined(PATH_TRACING_TRANSMITS_SHADOWS)
+    if (PathTracingSkipsTransmission(payload))
+    {
+        IgnoreHit();
+        return;
+    }
+#endif
+#if (defined(_SURFACE_TYPE_TRANSPARENT) || defined(_PATH_TRACING_TRANSMISSION_THIN)) && !defined(_PATH_TRACING_TRANSMISSION_REFRACTIVE)
+    if (PathTracingIsCulledFace())
+    {
+        IgnoreHit();
+        return;
+    }
+#endif
+    PATH_TRACING_TEMPLATE_SURFACE surface = PathTracingEvaluateTemplate(attributes, payload, true);
+    if (g_PathTracingClipped)
+    {
+        IgnoreHit();
+        return;
+    }
+    if (PathTracingGetRayKind(payload) == PT_RAY_VISIBILITY)
+    {
+#if defined(PATH_TRACING_TRANSMITS_SHADOWS) && defined(ILLUSION_PATH_TRACING_LIT_SURFACE_INCLUDED) && (defined(_PATH_TRACING_TRANSMISSION_THIN) || defined(_PATH_TRACING_TRANSMISSION_REFRACTIVE) || defined(ASE_REFRACTION))
+        PathTracingAccumulateShadowTransmission(payload, surface.specularTransmission * surface.transmissionTint);
+#elif defined(PATH_TRACING_TRANSMITS_SHADOWS)
+        PathTracingAccumulateShadowTransmission(payload, 1.0 - surface.alpha);
+#else
+        PathTracingAccumulateShadowTransmission(payload, 1.0 - PathTracingTemplateCoverage(surface));
+#endif
+        return;
+    }
+    if (!PathTracingAcceptCoverage(payload, PathTracingTemplateCoverage(surface)))
+    {
+        IgnoreHit();
+        return;
+    }
+#endif
+    PathTracingRecordRandomWalk(payload, attributes);
+}
+
+#endif

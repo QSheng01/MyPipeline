@@ -1,0 +1,403 @@
+// Modified from https://github.com/stalomeow/StarRailNPRShader and https://github.com/recaeee/RecaNoMaho_P
+using System;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.Universal;
+
+namespace Illusion.Rendering.Shadows
+{
+    public class ScreenSpaceShadowsPass : ScriptableRenderPass, IDisposable
+    {
+        private readonly LazyMaterial _shadowMaterial = new(IllusionShaders.ScreenSpaceShadows);
+
+        private readonly LazyMaterial _penumbraMaskMat = new(IllusionShaders.PenumbraMask);
+
+        private readonly IllusionRendererData _rendererData;
+
+        private RenderTextureDescriptor _penumbraMaskDesc;
+
+        private RTHandle _penumbraMaskTex;
+
+        private RTHandle _penumbraMaskBlurTempTex;
+
+        private int _colorAttachmentWidth;
+
+        private int _colorAttachmentHeight;
+
+        private readonly Vector4[] _cascadeOffsetScales;
+
+        private readonly Vector4[] _dirLightPcssParams0;
+
+        private readonly Vector4[] _dirLightPcssParams1;
+
+        private readonly ProfilingSampler _pcssPenumbraSampler;
+
+        private readonly ProfilingSampler _screenSpaceShadowSampler;
+
+        public ScreenSpaceShadowsPass(IllusionRendererData rendererData)
+        {
+            _rendererData = rendererData;
+            renderPassEvent = IllusionRenderPassEvent.ScreenSpaceShadowsPass;
+            profilingSampler = new ProfilingSampler("Screen Space Shadows");
+            _screenSpaceShadowSampler = new ProfilingSampler("Screen Space Shadows");
+
+            // PCSS
+            _pcssPenumbraSampler = new ProfilingSampler("PCSS Penumbra");
+            _penumbraMaskDesc = new RenderTextureDescriptor();
+            _cascadeOffsetScales = new Vector4[IllusionRendererData.ShadowCascadeCount];
+            _dirLightPcssParams0 = new Vector4[IllusionRendererData.ShadowCascadeCount];
+            _dirLightPcssParams1 = new Vector4[IllusionRendererData.ShadowCascadeCount];
+            ConfigureInput(ScriptableRenderPassInput.Depth);
+        }
+
+        public void Dispose()
+        {
+            _shadowMaterial.DestroyCache();
+            _penumbraMaskMat.DestroyCache();
+
+            _penumbraMaskTex?.Release();
+            _penumbraMaskTex = null;
+
+            _penumbraMaskBlurTempTex?.Release();
+            _penumbraMaskBlurTempTex = null;
+        }
+
+        private class PenumbraPassData
+        {
+            internal TextureHandle PenumbraMaskTexture;
+            internal TextureHandle PenumbraMaskBlurTempTexture;
+            internal TextureHandle DepthTexture;
+            internal UniversalShadowData ShadowData;
+            internal IllusionRendererData RendererData;
+            internal Material PenumbraMaskMaterial;
+            internal RenderTextureDescriptor PenumbraMaskDesc;
+            internal int ColorAttachmentWidth;
+            internal int ColorAttachmentHeight;
+            internal Vector4[] CascadeOffsetScales;
+            internal Vector4[] DirLightPcssParams0;
+            internal Vector4[] DirLightPcssParams1;
+            internal bool UsePenumbraMask;
+        }
+
+        private class ShadowPassData
+        {
+            internal TextureHandle ScreenSpaceShadowsTexture;
+            internal IllusionRendererData RendererData;
+            internal Material ShadowMaterial;
+            internal TextureHandle DepthTexture;
+            internal bool IncludeContactShadow;
+        }
+
+        private void SetupPenumbraMask(RenderTextureDescriptor cameraTargetDesc, bool usePenumbraMask)
+        {
+            _colorAttachmentWidth = cameraTargetDesc.width;
+            _colorAttachmentHeight = cameraTargetDesc.height;
+
+            if (!usePenumbraMask)
+            {
+                return;
+            }
+
+            var pcssParams = VolumeManager.instance.stack.GetComponent<PercentageCloserSoftShadows>();
+            _penumbraMaskDesc = cameraTargetDesc;
+            _penumbraMaskDesc.colorFormat = RenderTextureFormat.R8;
+            _penumbraMaskDesc.graphicsFormat = GraphicsFormat.R8_UNorm;
+            _penumbraMaskDesc.depthStencilFormat = GraphicsFormat.None;
+            _penumbraMaskDesc.autoGenerateMips = false;
+            _penumbraMaskDesc.useMipMap = false;
+            _penumbraMaskDesc.msaaSamples = 1;
+            _penumbraMaskDesc.width = Mathf.CeilToInt((float)cameraTargetDesc.width / pcssParams.penumbraMaskScale.value);
+            _penumbraMaskDesc.height = Mathf.CeilToInt((float)cameraTargetDesc.height / pcssParams.penumbraMaskScale.value);
+
+            RenderingUtils.ReAllocateHandleIfNeeded(ref _penumbraMaskTex, _penumbraMaskDesc,
+                wrapMode: TextureWrapMode.Clamp, filterMode: FilterMode.Bilinear,
+                name: "_PenumbraMaskTex");
+
+            RenderingUtils.ReAllocateHandleIfNeeded(ref _penumbraMaskBlurTempTex, _penumbraMaskDesc,
+                wrapMode: TextureWrapMode.Clamp, filterMode: FilterMode.Bilinear,
+                name: "_PenumbraMaskBlurTempTex");
+        }
+        
+        public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+        {
+            var resource = frameData.Get<UniversalResourceData>();
+            var cameraData = frameData.Get<UniversalCameraData>();
+            var shadowData = frameData.Get<UniversalShadowData>();
+            var descriptor = cameraData.cameraTargetDescriptor;
+            var pcssParams = VolumeManager.instance.stack.GetComponent<PercentageCloserSoftShadows>();
+            bool usePenumbraMask = _rendererData.PCSSShadowSampling && pcssParams.usePenumbraMask.value;
+            SetupPenumbraMask(descriptor, usePenumbraMask);
+            
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            GraphicsFormat preferredFormat = _rendererData.AdditionalDirectionalPerObjectShadows
+                ? GraphicsFormat.R8G8_UNorm
+                : GraphicsFormat.R8_UNorm;
+            descriptor.graphicsFormat = SystemInfo.IsFormatSupported(preferredFormat, GraphicsFormatUsage.Blend)
+                ? preferredFormat
+                : GraphicsFormat.B8G8R8A8_UNorm;
+
+            // Keep a persistent screen space shadow texture so temporal accumulation can run in a follow-up pass.
+            RenderingUtils.ReAllocateHandleIfNeeded(ref _rendererData.ScreenSpaceShadowsRT, descriptor,
+                wrapMode: TextureWrapMode.Clamp, filterMode: FilterMode.Bilinear,
+                name: "_ScreenSpaceShadowmapTexture");
+            TextureHandle screenSpaceShadowsTexture = renderGraph.ImportTexture(_rendererData.ScreenSpaceShadowsRT);
+            
+            TextureHandle preDepthTexture = resource.cameraDepthTexture;
+            if (frameData.Contains<TransparentDepthData>())
+            {
+                var transparentDepthData = frameData.Get<TransparentDepthData>();
+                if (transparentDepthData.PreDepthTexture.IsValid())
+                    preDepthTexture = transparentDepthData.PreDepthTexture;
+            }
+
+            // This pass always uploads PCSS globals; with the mask enabled it also renders
+            // the conservative penumbra mask used as an early-out in the shadow shader.
+            if (_rendererData.PCSSShadowSampling)
+            {
+                using (var builder = renderGraph.AddUnsafePass<PenumbraPassData>("PCSS Penumbra Pass", out var passData, _pcssPenumbraSampler))
+                {
+                    builder.UseTexture(preDepthTexture);
+                    passData.DepthTexture = preDepthTexture;
+                    passData.RendererData = _rendererData;
+                    passData.ColorAttachmentWidth = _colorAttachmentWidth;
+                    passData.ColorAttachmentHeight = _colorAttachmentHeight;
+                    passData.CascadeOffsetScales = _cascadeOffsetScales;
+                    passData.DirLightPcssParams0 = _dirLightPcssParams0;
+                    passData.DirLightPcssParams1 = _dirLightPcssParams1;
+                    passData.ShadowData = shadowData;
+                    passData.UsePenumbraMask = usePenumbraMask;
+
+                    if (usePenumbraMask)
+                    {
+                        TextureHandle penumbraMaskTexture = UniversalRenderer.CreateRenderGraphTexture(renderGraph, _penumbraMaskDesc, "_PenumbraMaskTex", false);
+                        TextureHandle penumbraMaskBlurTempTexture = UniversalRenderer.CreateRenderGraphTexture(renderGraph, _penumbraMaskDesc, "_PenumbraMaskBlurTempTex", false);
+
+                        passData.PenumbraMaskMaterial = _penumbraMaskMat.Value;
+                        passData.PenumbraMaskDesc = _penumbraMaskDesc;
+                        builder.UseTexture(penumbraMaskTexture, AccessFlags.Write);
+                        passData.PenumbraMaskTexture = penumbraMaskTexture;
+                        builder.UseTexture(penumbraMaskBlurTempTexture, AccessFlags.Write);
+                        passData.PenumbraMaskBlurTempTexture = penumbraMaskBlurTempTexture;
+                    }
+
+                    builder.AllowPassCulling(false);
+                    builder.AllowGlobalStateModification(true);
+
+                    builder.SetRenderFunc((PenumbraPassData data, UnsafeGraphContext context) =>
+                    {
+                        ExecutePenumbraPass(context.cmd, data);
+                    });
+                }
+            }
+
+            // Screen Space Shadows Pass - Use RasterPass for single render target
+            using (var builder = renderGraph.AddRasterRenderPass<ShadowPassData>("Screen Space Shadows Pass", out var passData, _screenSpaceShadowSampler))
+            {
+                builder.SetRenderAttachment(screenSpaceShadowsTexture, 0);
+                passData.ScreenSpaceShadowsTexture = screenSpaceShadowsTexture;
+                passData.RendererData = _rendererData;
+                passData.ShadowMaterial = _shadowMaterial.Value;
+                builder.UseTexture(preDepthTexture);
+                passData.DepthTexture = preDepthTexture;
+                
+                builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
+
+                bool useShadowTemporalAccumulation = _rendererData.PCSSShadowSampling && pcssParams.shadowTemporalAccumulation.value;
+                passData.IncludeContactShadow = !useShadowTemporalAccumulation;
+                if (!useShadowTemporalAccumulation)
+                {
+                    builder.SetGlobalTextureAfterPass(screenSpaceShadowsTexture, IllusionShaderProperties.ScreenSpaceShadowmapTexture);
+                }
+
+                builder.SetRenderFunc((ShadowPassData data, RasterGraphContext rgContext) =>
+                {
+                    ExecuteShadowPass(rgContext.cmd, data);
+                });
+            }
+        }
+
+        private static void ExecutePenumbraPass(UnsafeCommandBuffer cmd, PenumbraPassData data)
+        {
+            cmd.EnableShaderKeyword(IllusionShaderKeywords._PCSS_SHADOWS);
+            PackDirLightParamsRenderGraph(cmd, data);
+
+            if (data.UsePenumbraMask)
+            {
+                RenderPenumbraMaskRenderGraph(cmd, data);
+            }
+        }
+
+        private static void ExecuteShadowPass(RasterCommandBuffer cmd, ShadowPassData data)
+        {
+            Material material = data.ShadowMaterial;
+            var config = IllusionRuntimeRenderingConfig.Get();
+            var rendererData = data.RendererData;
+
+            // Setup debug keywords
+            var debugMode = config.ScreenSpaceShadowDebugMode;
+            CoreUtils.SetKeyword(cmd, IllusionShaderKeywords._DEBUG_SCREEN_SPACE_SHADOW_MAINLIGHT, debugMode == ScreenSpaceShadowDebugMode.MainLightShadow);
+            CoreUtils.SetKeyword(cmd, IllusionShaderKeywords._DEBUG_SCREEN_SPACE_SHADOW_CONTACT, debugMode == ScreenSpaceShadowDebugMode.ContactShadow);
+
+            // Bind ContactShadow
+            var contactShadowParam = VolumeManager.instance.stack.GetComponent<ContactShadows>();
+            if (rendererData.ContactShadowsSampling)
+            {
+                var contactShadowRT = contactShadowParam.shadowDenoiser.value == ShadowDenoiser.Spatial
+                    ? rendererData.ContactShadowsDenoisedRT
+                    : rendererData.ContactShadowsRT;
+                if (contactShadowRT != null && contactShadowRT.IsValid())
+                {
+                    material.SetTexture(IllusionShaderProperties._ContactShadowMap, contactShadowRT);
+                }
+            }
+            material.SetFloat(ShaderProperties.IncludeContactShadow, data.IncludeContactShadow ? 1.0f : 0.0f);
+            CoreUtils.SetKeyword(cmd, IllusionShaderKeywords._CONTACT_SHADOWS, rendererData.ContactShadowsSampling);
+            
+            // Handle PCSS keyword
+            if (rendererData.PCSSShadowSampling)
+            {
+                cmd.EnableShaderKeyword(IllusionShaderKeywords._PCSS_SHADOWS);
+            }
+            else
+            {
+                cmd.DisableShaderKeyword(IllusionShaderKeywords._PCSS_SHADOWS);
+            }
+            material.SetTexture(IllusionShaderProperties._CameraDepthTexture, data.DepthTexture);
+            Blitter.BlitTexture(cmd, data.ScreenSpaceShadowsTexture, Vector2.one, material, 0);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, false);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, false);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowScreen, true);
+        }
+
+        private static void RenderPenumbraMaskRenderGraph(UnsafeCommandBuffer cmd, PenumbraPassData data)
+        {
+            var material = data.PenumbraMaskMaterial;
+            var penumbraMaskDesc = data.PenumbraMaskDesc;
+            material.SetTexture(IllusionShaderProperties._CameraDepthTexture, (RTHandle)data.DepthTexture);
+            cmd.SetRenderTarget(data.PenumbraMaskTexture);
+            cmd.SetGlobalVector(ShaderProperties.ColorAttachmentTexelSize,
+                new Vector4(1f / data.ColorAttachmentWidth, 1f / data.ColorAttachmentHeight, data.ColorAttachmentWidth,
+                    data.ColorAttachmentHeight));
+            cmd.SetGlobalVector(ShaderProperties.PenumbraMaskTexelSize, new Vector4(1f / penumbraMaskDesc.width, 1f / penumbraMaskDesc.height, penumbraMaskDesc.width, penumbraMaskDesc.height));
+            cmd.SetGlobalVector(ShaderProperties.BlitScaleBias, new Vector4(1, 1, 0, 0));
+            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetGlobalTexture(ShaderProperties.PenumbraMaskTex, data.PenumbraMaskTexture);
+            cmd.SetRenderTarget(data.PenumbraMaskBlurTempTexture);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetGlobalTexture(ShaderProperties.PenumbraMaskTex, data.PenumbraMaskBlurTempTexture);
+            cmd.SetRenderTarget(data.PenumbraMaskTexture);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetGlobalTexture(ShaderProperties.PenumbraMaskTex, data.PenumbraMaskTexture);
+        }
+
+        private static void PackDirLightParamsRenderGraph(UnsafeCommandBuffer cmd, PenumbraPassData data)
+        {
+            var pcssParams = VolumeManager.instance.stack.GetComponent<PercentageCloserSoftShadows>();
+            var rendererData = data.RendererData;
+            var slices = rendererData.ShadowData.MainSlices;
+            int cascadeCount = Math.Min(slices.Length,
+                Math.Min(data.ShadowData.mainLightShadowCascadesCount, IllusionRendererData.ShadowCascadeCount));
+            Array.Clear(data.CascadeOffsetScales, 0, data.CascadeOffsetScales.Length);
+            Array.Clear(data.DirLightPcssParams0, 0, data.DirLightPcssParams0.Length);
+            Array.Clear(data.DirLightPcssParams1, 0, data.DirLightPcssParams1.Length);
+
+            if (cascadeCount > 0)
+            {
+                float renderTargetWidth = data.ShadowData.mainLightShadowmapWidth;
+                float renderTargetHeight = data.ShadowData.mainLightShadowCascadesCount == 2
+                    ? data.ShadowData.mainLightShadowmapHeight >> 1
+                    : data.ShadowData.mainLightShadowmapHeight;
+                float invShadowAtlasWidth = 1.0f / renderTargetWidth;
+                float invShadowAtlasHeight = 1.0f / renderTargetHeight;
+                for (int i = 0; i < cascadeCount; i++)
+                {
+                    data.CascadeOffsetScales[i] = new Vector4(
+                        slices[i].offsetX * invShadowAtlasWidth,
+                        slices[i].offsetY * invShadowAtlasHeight,
+                        slices[i].resolution * invShadowAtlasWidth,
+                        slices[i].resolution * invShadowAtlasHeight);
+                }
+            }
+
+            cmd.SetGlobalVectorArray(ShaderProperties.CascadeOffsetScales, data.CascadeOffsetScales);
+
+            cmd.SetGlobalFloat(ShaderProperties.FindBlockerSampleCount, pcssParams.findBlockerSampleCount.value);
+            cmd.SetGlobalFloat(ShaderProperties.PcfSampleCount, pcssParams.pcfSampleCount.value);
+            cmd.SetGlobalFloat(ShaderProperties.UsePenumbraMask, pcssParams.usePenumbraMask.value ? 1.0f : 0.0f);
+
+            float minMaskDilation = Mathf.Min(pcssParams.penumbraMaskMinDilation.value, pcssParams.penumbraMaskDilation.value);
+            float maxMaskDilation = Mathf.Max(pcssParams.penumbraMaskMinDilation.value, pcssParams.penumbraMaskDilation.value);
+            // Penumbra-mask fades are compared against metric eye depth.
+            float dilationFadeStart = rendererData.ScaleWorldDistance(pcssParams.penumbraMaskDilationFadeStart.value);
+            float dilationFadeEnd = Mathf.Max(
+                dilationFadeStart + rendererData.ScaleWorldDistance(0.001f),
+                rendererData.ScaleWorldDistance(pcssParams.penumbraMaskDilationFadeEnd.value));
+            // x/y are min/max mask dilation in mask texels; z/w define the eye-depth fade range.
+            cmd.SetGlobalVector(ShaderProperties.PenumbraMaskDilationParams,
+                new Vector4(minMaskDilation, maxMaskDilation, dilationFadeStart, 1.0f / (dilationFadeEnd - dilationFadeStart)));
+
+            float lightAngularDiameter = pcssParams.angularDiameter.value;
+            float dirlightDepth2Radius = Mathf.Tan(0.5f * Mathf.Deg2Rad * lightAngularDiameter);
+            float minFilterAngularDiameter = Mathf.Max(pcssParams.blockerSearchAngularDiameter.value, pcssParams.minFilterMaxAngularDiameter.value);
+            float halfMinFilterAngularDiameterTangent = Mathf.Tan(0.5f * Mathf.Deg2Rad * Mathf.Max(minFilterAngularDiameter, lightAngularDiameter));
+            float halfBlockerSearchAngularDiameterTangent = Mathf.Tan(0.5f * Mathf.Deg2Rad * Mathf.Max(pcssParams.blockerSearchAngularDiameter.value, lightAngularDiameter));
+
+            for (int i = 0; i < cascadeCount; ++i)
+            {
+                float shadowmapDepth2RadialScale = Mathf.Abs(rendererData.ShadowData.DeviceProjections[i].m00 / rendererData.ShadowData.DeviceProjections[i].m22);
+                
+                // Reuse arrays from data
+                data.DirLightPcssParams0[i].x = dirlightDepth2Radius * shadowmapDepth2RadialScale;
+                data.DirLightPcssParams0[i].y = 1.0f / data.DirLightPcssParams0[i].x;
+                // Scale metric caps while leaving angular and texel terms unchanged.
+                data.DirLightPcssParams0[i].z = rendererData.ScaleWorldDistance(pcssParams.maxPenumbraSize.value)
+                                                    / (2.0f * halfMinFilterAngularDiameterTangent);
+                data.DirLightPcssParams0[i].w = rendererData.ScaleWorldDistance(pcssParams.maxSamplingDistance.value);
+
+                data.DirLightPcssParams1[i].x = pcssParams.minFilterSizeTexels.value;
+                data.DirLightPcssParams1[i].y = 1.0f / (halfMinFilterAngularDiameterTangent * shadowmapDepth2RadialScale);
+                data.DirLightPcssParams1[i].z = 1.0f / (halfBlockerSearchAngularDiameterTangent * shadowmapDepth2RadialScale);
+            }
+
+            cmd.SetGlobalVectorArray(ShaderProperties.DirLightPcssParams0, data.DirLightPcssParams0);
+            cmd.SetGlobalVectorArray(ShaderProperties.DirLightPcssParams1, data.DirLightPcssParams1);
+            cmd.SetGlobalVectorArray(ShaderProperties.DirLightPcssProjs, rendererData.ShadowData.DeviceProjectionVectors);
+        }
+        
+        private static class ShaderProperties
+        {
+            public static readonly int CascadeOffsetScales = Shader.PropertyToID("_CascadeOffsetScales");
+
+            public static readonly int DirLightPcssParams0 = Shader.PropertyToID("_DirLightPcssParams0");
+
+            public static readonly int DirLightPcssParams1 = Shader.PropertyToID("_DirLightPcssParams1");
+
+            public static readonly int DirLightPcssProjs = Shader.PropertyToID("_DirLightPcssProjs");
+
+            public static readonly int ColorAttachmentTexelSize = Shader.PropertyToID("_ColorAttachmentTexelSize");
+
+            public static readonly int PenumbraMaskTexelSize = Shader.PropertyToID("_PenumbraMaskTexelSize");
+
+            public static readonly int BlitScaleBias = Shader.PropertyToID("_BlitScaleBias");
+
+            public static readonly int PenumbraMaskTex = Shader.PropertyToID("_PenumbraMaskTex");
+
+            public static readonly int FindBlockerSampleCount = Shader.PropertyToID("_FindBlockerSampleCount");
+
+            public static readonly int PcfSampleCount = Shader.PropertyToID("_PcfSampleCount");
+
+            public static readonly int UsePenumbraMask = Shader.PropertyToID("_UsePenumbraMask");
+
+            public static readonly int PenumbraMaskDilationParams = Shader.PropertyToID("_PenumbraMaskDilationParams");
+
+            public static readonly int IncludeContactShadow = Shader.PropertyToID("_IncludeContactShadow");
+        }
+    }
+}

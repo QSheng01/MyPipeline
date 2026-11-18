@@ -1,0 +1,290 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 30000_pet_xuegunxiong_lv1
+  m_Shader: {fileID: 4800000, guid: 5e86668b977b37a4e80749ba6528f5b4, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _Normal
+  - _USERIM
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: 2000
+  stringTagMap:
+    RenderType: Opaque
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 7c94f58e19e7fe949b36a11177ebf627, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMaskMap:
+        m_Texture: {fileID: 2800000, guid: 8f86ac065000bf44d8e05de93f238cfa, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CustomGIMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailAlbedoMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailMask:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailNormalMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EffectMaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EvnCubemap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FlowMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LayerTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LightMap:
+        m_Texture: {fileID: 2800000, guid: 6e28dfee1617eaf4d8f4dcafd631fae6, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MetallicGlossMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _OcclusionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ParallaxMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampMap:
+        m_Texture: {fileID: 2800000, guid: 27d470cdade680b498983e097128e56c, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SpecGlossMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_Lightmaps:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_LightmapsInd:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_ShadowMasks:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaClip: 0
+    - _AlphaToMask: 0
+    - _AnisotropyBrightness: 1
+    - _AnisotropyIntensity: 0
+    - _AnisotropySpecularBlendAlbedoIntensity: 0.5
+    - _AnisotropySpecularTip: 1
+    - _BaseMapTip: 1
+    - _BaseSetting: 1
+    - _Blend: 0
+    - _BlendModePreserveSpecular: 1
+    - _BumpMapTip: 1
+    - _BumpScale: 1
+    - _ClearCoatMask: 0
+    - _ClearCoatSmoothness: 0
+    - _Cull: 2
+    - _CustomShadowDepthBias: 1
+    - _CustomShadowNormalBias: 0.01
+    - _Cutoff: 0.5
+    - _CutoffEnd: 0.011
+    - _DetailAlbedoMapScale: 1
+    - _DetailNormalMapScale: 1
+    - _DiffuseSetting: 1
+    - _DstBlend: 0
+    - _DstBlendAlpha: 0
+    - _EdgeFade: 0.4
+    - _EffectFresnelFactor: 1
+    - _EffectFresnelPower: 2
+    - _EffectFresnelSetting: 1
+    - _EffectFresnelSmooth: 1
+    - _EffectFresnelThreshold: 0
+    - _EffectMaskTip: 1
+    - _EmissionInstensity: 0.9
+    - _EmissionSetting: 1
+    - _EnvBlendAlbedoIntensity: 0
+    - _EnvBrightness: 1
+    - _EnvMaskTip: 1
+    - _EnvRotate: 0
+    - _EnvShadingSetting: 1
+    - _EnvironmentReflections: 1
+    - _Fur: 1
+    - _FurLength: 0.191
+    - _GlossMapScale: 0
+    - _Glossiness: 0
+    - _GlossyReflections: 0
+    - _GravityStrength: 0.25
+    - _HeavyShadowIntensity: 1
+    - _HeavyShadowRange: 0.21
+    - _HeavyShadowSetting: 1
+    - _HeavyShadowSoftness: 0.6
+    - _HitRimFactor: 0
+    - _HitRimPower: 1
+    - _HitRimSmooth: 1
+    - _HitRimThreshold: 0
+    - _HitSetting: 1
+    - _IsBakeGIMap: 0
+    - _LightMapTip: 1
+    - _MapSetting: 1
+    - _MaskTip: 1
+    - _MetaIntensity: 1.46
+    - _Metallic: 0.494
+    - _Mode: 0
+    - _MultipleLightBlend: 0.5
+    - _MultipleLightIntensity: 2.5
+    - _MultipleLightSetting: 1
+    - _OcclusionStrength: 1
+    - _Offset_Z: 0
+    - _OutLineSetting: 0
+    - _OutlineType: 0
+    - _Outline_Width: 1
+    - _Parallax: 0.005
+    - _PlaneShadowDistanceDisappearPos: -0.5
+    - _PlaneShadowDistanceDisappearSoftness: 2.1
+    - _PlaneShadowHeightOffset: 0
+    - _PlaneShadowHorizontalOffset: 0
+    - _PlaneShadowSetting: 1
+    - _QueueOffset: 0
+    - _RampMapTip: 1
+    - _ReceiveShadows: 1
+    - _RimColorBlendAlbedo: 0.25
+    - _RimDepthWidth: 0.01
+    - _RimLambertMaskThreshold: 0.5
+    - _RimSetting: 1
+    - _RimThreshold: 0
+    - _SHBrightness: 1
+    - _ShadowColorTip: 1
+    - _ShadowIntensity: 1
+    - _ShadowLerp: 1
+    - _ShadowOffsetTip: 1
+    - _ShadowSetting: 1
+    - _SilkStockingDarkFresnelContrast: 1
+    - _SilkStockingDarkFresnelIntensity: 1
+    - _SilkStockingDarkFresnelRange: 0
+    - _SilkStockingDarkFresnelSoftness: 0.5
+    - _SilkStockingDarkFresnelTip: 1
+    - _SilkStockingDarkSideBrightness: 1
+    - _SilkStockingDarkSideRange: 0
+    - _SilkStockingDarkSideSoftness: 0.5
+    - _SilkStockingDarkSideTip: 1
+    - _SilkStockingRimBrightness: 1
+    - _SilkStockingRimTip: 1
+    - _SilkStockingRimWidth: 0.5
+    - _SilkStockingSkinColorBrightness: 1
+    - _SilkStockingSkinTip: 1
+    - _Smoothness: 0.846
+    - _SmoothnessTextureChannel: 0
+    - _SpecularBlendAlbedoIntensity: 0.988
+    - _SpecularHighlights: 1
+    - _SpecularInstensity: 5.47
+    - _SpecularSetting: 1
+    - _SrcBlend: 1
+    - _SrcBlendAlpha: 1
+    - _SuoNormal: 0
+    - _Surface: 0
+    - _TransparentShadow: 0
+    - _USEOUTLINE: 0
+    - _UVOffset: 0
+    - _UseAnisotropySpecular: 0
+    - _UseEffectFresnel: 0
+    - _UseShadowMask: 0
+    - _UseSilkStocking: 0
+    - _WholeEmissionColorTip: 1
+    - _WorkflowMode: 1
+    - _ZTest: 4
+    - _ZWrite: 1
+    - _useRim: 1
+    m_Colors:
+    - _AnisotropySpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _EffectFresnelColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EmissionColor: {r: 0.5276789, g: 0.8629509, b: 0.9245283, a: 1}
+    - _EnvColor: {r: 1, g: 1, b: 1, a: 1}
+    - _Gravity: {r: 0, g: -1, b: 0, a: 0}
+    - _HeavyShadowColor: {r: 0.9372549, g: 0.9843137, b: 1, a: 1}
+    - _HitRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
+    - _PlaneShadowColor: {r: 0, g: 0, b: 0, a: 0.6}
+    - _RimColor: {r: 0.61960787, g: 0.7176471, b: 1, a: 1}
+    - _RimLightDir: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _ShadowColor: {r: 0, g: 0, b: 0, a: 0}
+    - _SilkStockingDarkFresnelColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _SilkStockingDarkSideColor: {r: 0.69034, g: 0.06411998, b: 0, a: 1}
+    - _SilkStockingRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SilkStockingSkinColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
+    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _WholeEmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - custom_SHAb: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHAg: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHAr: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHBb: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHBg: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHBr: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHC: {r: 0, g: 0, b: 0, a: 0}
+  m_BuildTextureStacks: []
+--- !u!114 &3665517573994792850
+MonoBehaviour:
+  m_ObjectHideFlags: 11
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0353a89b1f911e48b9e16bdc9f2e058, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  version: 7

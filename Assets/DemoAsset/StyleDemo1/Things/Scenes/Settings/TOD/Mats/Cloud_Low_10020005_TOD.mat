@@ -1,0 +1,264 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-5737125280329554396
+MonoBehaviour:
+  m_ObjectHideFlags: 11
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0353a89b1f911e48b9e16bdc9f2e058, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  version: 7
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Cloud_Low_10020005_TOD
+  m_Shader: {fileID: 4800000, guid: d02648fc1b66dff47a5cd3382d6af6d4, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _TOD
+  m_InvalidKeywords:
+  - 
+  - OFF
+  - _
+  - _DAY
+  - _OFF
+  - _SCREENPOS
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 1
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: b8e63a800e909e647b0a1e7d8ae449ad, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CloudBackTexture:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CloudFrontTexture:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CloudTexture:
+        m_Texture: {fileID: 2800000, guid: 7a2bab58a60c6a3429d8c53456b13abb, type: 3}
+        m_Scale: {x: -1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailAlbedoMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailMask:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailNormalMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 2800000, guid: b8e63a800e909e647b0a1e7d8ae449ad, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MetallicGlossMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MoonTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NoiseTex:
+        m_Texture: {fileID: 2800000, guid: f7aa36b59a5179240bfce760bc8f0b85, type: 3}
+        m_Scale: {x: 50, y: 30}
+        m_Offset: {x: 0, y: 0}
+    - _OcclusionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ParallaxMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SpecGlossMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _StarMaskTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _StarsTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _skyTex:
+        m_Texture: {fileID: 2800000, guid: 15da2bc6cdd351640be0ce6de2d173fd, type: 3}
+        m_Scale: {x: -1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_Lightmaps:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_LightmapsInd:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_ShadowMasks:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaClip: 0
+    - _AlphaScale: 1
+    - _AlphaToMask: 0
+    - _BaseSetting: 1
+    - _Bias: 0.75
+    - _Blend: 0
+    - _BlendModePreserveSpecular: 0
+    - _BumpScale: 1
+    - _ClearCoatMask: 0
+    - _ClearCoatSmoothness: 0
+    - _CloudContrast: 1
+    - _CloudDissolveOffset: 83.08
+    - _CloudDissolveRange: 1
+    - _CloudDissolveSpeed: 0.01
+    - _CloudDissolveStrength: 0.4
+    - _CloudDissovleOffset: 1.5
+    - _CloudDissovleSpeed: 0.1
+    - _CloudDissovleStrength: 1.5
+    - _CloudDistStrength: -0.0015
+    - _CloudFogBase: -1000
+    - _CloudFogHeight: 2000
+    - _CloudFogPower: 0.8
+    - _CloudFogSetting: 0
+    - _CloudGlobalDissolve: 0.352
+    - _CloudGlobalDissolveTest: 0
+    - _CloudGrowth: 0.2620265
+    - _CloudSpeed: 1.2
+    - _CloudSpeedU: 1
+    - _CloudSpeedV: 0.5
+    - _Cloudshadow: 1
+    - _Cull: 2
+    - _CustomLightDirON: 0
+    - _Cutoff: 0.5
+    - _DetailAlbedoMapScale: 1
+    - _DetailNormalMapScale: 1
+    - _DisovleSetting: 0
+    - _DstBlend: 10
+    - _DstBlendAlpha: 10
+    - _EdgeSetting: 1
+    - _EnvironmentReflections: 1
+    - _FogControl: 0.653
+    - _FogSetting: 0
+    - _GlossMapScale: 0
+    - _Glossiness: 0
+    - _GlossyReflections: 0
+    - _HorizonOffset: 0
+    - _IsNight: 0
+    - _IsTod: 0
+    - _LerpCtrl: 4
+    - _LerpSpeed: 1
+    - _LightSetting: 0
+    - _Lightback: 0
+    - _Metallic: 0
+    - _MoonHalo: 0.4
+    - _MoonRadius: 3
+    - _MoonType: 0
+    - _Newoff: 0
+    - _NoiseSetting: 0
+    - _OcclusionStrength: 1
+    - _Parallax: 0.005
+    - _QueueControl: 0
+    - _QueueOffset: 0
+    - _ReceiveShadows: 1
+    - _RimIntensity: 1
+    - _RimRadius: 0.1
+    - _RimSetting: 0
+    - _SDFSetting: 0
+    - _SideAlpha: 100
+    - _SkyFogExponent: 2.5
+    - _SkyFogIntensity: 1
+    - _SkyGradientExponent: 2.5
+    - _SkyGradientHeight: 1
+    - _SkyGradientWidth: 1
+    - _SkySetting: 1
+    - _Smoothness: 0
+    - _SmoothnessTextureChannel: 0
+    - _SpecularHighlights: 1
+    - _SrcBlend: 5
+    - _SrcBlendAlpha: 1
+    - _StarMaskSize: 1
+    - _StarSetting: 0
+    - _StarsSize: 1
+    - _StarsSpeed: 0.3
+    - _SunHaloExponent: 125
+    - _SunMoonSetting: 0
+    - _SunRadius: 0.5
+    - _SunScatterDarkRange: 10
+    - _SunScatterIntensity: 1.49
+    - _SunScatterLightRange: 1.9
+    - _SunScatterPower: 3.7
+    - _SunScatterRange: 22.3
+    - _Surface: 1
+    - _TOD: 1
+    - _Tod: 0
+    - _WorkflowMode: 1
+    - _ZWrite: 0
+    - _alpha: 1
+    - _cutoff: 0.6
+    m_Colors:
+    - _AmbientColor: {r: 0.20784307, g: 0.25882348, b: 0.29803917, a: 1}
+    - _AmbientColorT: {r: 0.20784307, g: 0.25882348, b: 0.29803917, a: 1}
+    - _BaseColor: {r: 0.5529412, g: 0.65882355, b: 0.78823537, a: 1}
+    - _BaseDarkColor: {r: 0.65999997, g: 0.7820541, b: 1, a: 1}
+    - _BaseLightColor: {r: 3.0586941, g: 3.0586941, b: 3.0586941, a: 1}
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _Color01: {r: 1, g: 1, b: 1, a: 1}
+    - _Color02: {r: 1, g: 1, b: 1, a: 1}
+    - _DarkColor: {r: 0.20784307, g: 0.25882348, b: 0.29803917, a: 1}
+    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _LightDir: {r: 24, g: 142, b: 0, a: 0}
+    - _MieScatteringColor: {r: 1, g: 1, b: 1, a: 1}
+    - _MoonColor: {r: 1, g: 1, b: 1, a: 1}
+    - _MoonHaloColor: {r: 0.19999996, g: 0.29999998, b: 0.5, a: 1}
+    - _RayleighScatteringColor: {r: 1, g: 1, b: 1, a: 1}
+    - _ScatterColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SkyBaseDarkColor: {r: 0.26762193, g: 0.38965413, b: 0.5849056, a: 0}
+    - _SkyBaseLightColor: {r: 0.9150943, g: 0.79854923, b: 0.56545925, a: 0}
+    - _SkyBottomColor: {r: 0.3, g: 0.35, b: 0.4, a: 1}
+    - _SkyColor: {r: 1, g: 1, b: 1, a: 0}
+    - _SkySpecLightColor: {r: 0.9622642, g: 0.7917712, b: 0.6944642, a: 0}
+    - _SkyTopColor: {r: 0.2, g: 0.4, b: 0.6, a: 1}
+    - _SpecColor: {r: 6.664597, g: 6.664597, b: 6.664597, a: 1}
+    - _StarsColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SunColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SunHalo: {r: 0, g: 0, b: 0, a: 1}
+    - _SunScatterDarkColor: {r: 6.4980206, g: 6.4980206, b: 6.4980206, a: 1}
+    - _SunScatterIntensity: {r: 1, g: 0.7935217, b: 0.3254717, a: 1}
+    - _SunScatterLightColor: {r: 6.4222336, g: 4.640148, b: 0, a: 1}
+  m_BuildTextureStacks: []

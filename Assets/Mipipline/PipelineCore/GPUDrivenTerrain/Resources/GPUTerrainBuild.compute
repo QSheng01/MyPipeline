@@ -1,0 +1,261 @@
+#pragma kernel CopyHeight
+#pragma kernel BakeNormal
+#pragma kernel BuildMinMax
+#pragma kernel ReduceMinMax
+#pragma kernel Seed
+#pragma kernel BuildDispatch
+#pragma kernel BuildLodDispatch
+#pragma kernel TraverseQuadTree
+#pragma kernel BuildLodMap
+#pragma kernel BuildPatches
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+Texture2D<float4> _SourceHeight;
+RWTexture2D<float> _HeightOutput;
+Texture2D<float> _Height;
+RWTexture2D<float2> _NormalOutput;
+RWStructuredBuffer<float2> _MinMax;
+StructuredBuffer<uint4> _Nodes;
+AppendStructuredBuffer<uint4> _NextNodes;
+AppendStructuredBuffer<uint4> _Leaves;
+StructuredBuffer<uint4> _LeafRead;
+ByteAddressBuffer _Count;
+RWByteAddressBuffer _Dispatch;
+// Frustum survivors, Hi-Z rejects, selected leaves, final visible patches.
+RWByteAddressBuffer _Stats;
+RWTexture2D<uint> _LodMap;
+// xy: finest-patch origin, z: LOD, w: four 8-bit neighbour LOD deltas.
+AppendStructuredBuffer<uint4> _Visible;
+AppendStructuredBuffer<uint4> _Shadow;
+
+int _Resolution, _Grid, _PatchGrid, _MaxLOD, _ReduceLOD;
+float3 _Origin, _Size, _CameraPosition;
+float _LodDistance, _BoundsPadding;
+int _FrustumCulling, _UseHiZ;
+float4 _Planes[6];
+Texture2D<float> _HiZ;
+float4 _HiZScreenSize, _HiZMipOffsets[16], _HiZMipSizes[16];
+float4x4 _HiZVP;
+int _HiZMaxMip, _ReversedZ;
+float _HiZBias;
+
+uint LevelOffset(uint lod)
+{
+    uint count = (uint)_PatchGrid * _PatchGrid;
+    return (count * 4 - (count >> (lod * 2)) * 4) / 3;
+}
+
+float2 Heights(uint2 cell, uint lod)
+{
+    uint n = (uint)_PatchGrid >> lod;
+    return _MinMax[LevelOffset(lod) + cell.y * n + cell.x];
+}
+
+void Bounds(uint4 node, out float3 center, out float3 extent)
+{
+    float2 size = _Size.xz * (float)(1u << node.z) / _Grid;
+    // Each leaf node contains 8x8 patches, hence the three extra min/max levels.
+    float2 heights = Heights(node.xy >> node.z, node.z + 3) * _Size.y + _Origin.y;
+    center = float3(_Origin.x + node.x * _Size.x / _Grid + size.x * 0.5,
+        (heights.x + heights.y) * 0.5,
+        _Origin.z + node.y * _Size.z / _Grid + size.y * 0.5);
+    extent = float3(size.x * 0.5, (heights.y - heights.x) * 0.5 + _BoundsPadding, size.y * 0.5);
+}
+
+[numthreads(8,8,1)]
+void CopyHeight(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint)_Resolution)) return;
+    // Unity Terrain stores [0,32766] in an unsigned 16-bit texture.
+    _HeightOutput[id.xy] = UnpackHeightmap(_SourceHeight.Load(int3(id.xy,0))) * (65535.0 / 32766.0);
+}
+
+[numthreads(8,8,1)]
+void BakeNormal(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint)_Resolution)) return;
+    uint2 lo = (uint2)max((int2)id.xy - 1, 0);
+    uint2 hi = min(id.xy + 1, (uint)_Resolution - 1);
+    float left = _Height.Load(int3(lo.x, id.y, 0));
+    float right = _Height.Load(int3(hi.x, id.y, 0));
+    float down = _Height.Load(int3(id.x, lo.y, 0));
+    float up = _Height.Load(int3(id.x, hi.y, 0));
+    float dx = (right - left) * _Size.y * (_Resolution - 1) / max((hi.x - lo.x) * _Size.x, 0.0001);
+    float dz = (up - down) * _Size.y * (_Resolution - 1) / max((hi.y - lo.y) * _Size.z, 0.0001);
+    float3 normal = normalize(float3(-dx, 1, -dz));
+    _NormalOutput[id.xy] = normal.xz * 0.5 + 0.5;
+}
+
+[numthreads(8,8,1)]
+void BuildMinMax(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint)_PatchGrid)) return;
+    uint step = ((uint)_Resolution - 1) / _PatchGrid;
+    uint2 start = id.xy * step;
+    float2 range = float2(1,0);
+    // Include the shared end vertices, otherwise sharp boundary peaks escape the AABB.
+    for (uint y=0; y<=step; y++) for (uint x=0; x<=step; x++)
+    {
+        float h = _Height.Load(int3(start + uint2(x,y),0));
+        range = float2(min(range.x,h),max(range.y,h));
+    }
+    _MinMax[id.y * _PatchGrid + id.x] = range;
+}
+
+[numthreads(8,8,1)]
+void ReduceMinMax(uint3 id : SV_DispatchThreadID)
+{
+    uint n = (uint)_PatchGrid >> _ReduceLOD;
+    if (any(id.xy >= n)) return;
+    float2 a=Heights(id.xy*2, _ReduceLOD-1), b=Heights(id.xy*2+uint2(1,0), _ReduceLOD-1);
+    float2 c=Heights(id.xy*2+uint2(0,1), _ReduceLOD-1), d=Heights(id.xy*2+1, _ReduceLOD-1);
+    _MinMax[LevelOffset(_ReduceLOD)+id.y*n+id.x]=float2(min(min(a.x,b.x),min(c.x,d.x)),max(max(a.y,b.y),max(c.y,d.y)));
+}
+
+[numthreads(1,1,1)]
+void Seed(uint3 id : SV_DispatchThreadID)
+{
+    _Stats.Store4(0,0);
+    _NextNodes.Append(uint4(0,0,_MaxLOD,0));
+}
+
+[numthreads(1,1,1)]
+void BuildDispatch(uint3 id : SV_DispatchThreadID)
+{
+    _Dispatch.Store3(0,uint3(max(1,(_Count.Load(0)+63)/64),1,1));
+}
+
+[numthreads(1,1,1)]
+void BuildLodDispatch(uint3 id : SV_DispatchThreadID)
+{
+    uint count=_Count.Load(0);
+    _Dispatch.Store3(0,uint3(min(count,256u),max(1u,(count+255)/256),1));
+}
+
+[numthreads(64,1,1)]
+void TraverseQuadTree(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Count.Load(0)) return;
+    uint4 node = _Nodes[id.x];
+    float3 center, extent;
+    Bounds(node,center,extent);
+    float distanceToBox=length(max(abs(_CameraPosition-center)-extent,0));
+    if (node.z > 0 && distanceToBox < max(extent.x,extent.z)*2*_LodDistance)
+    {
+        uint step=1u<<(node.z-1);
+        _NextNodes.Append(uint4(node.xy,node.z-1,0));
+        _NextNodes.Append(uint4(node.xy+uint2(step,0),node.z-1,0));
+        _NextNodes.Append(uint4(node.xy+uint2(0,step),node.z-1,0));
+        _NextNodes.Append(uint4(node.xy+step,node.z-1,0));
+    }
+    else _Leaves.Append(node);
+}
+
+[numthreads(8,8,1)]
+void BuildLodMap(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
+{
+    uint index=group.x+group.y*256;
+    if(index>=_Count.Load(0)) return;
+    uint4 node=_LeafRead[index];
+    uint side=1u<<node.z;
+    for(uint y=local.y;y<side;y+=8) for(uint x=local.x;x<side;x+=8)
+        _LodMap[node.xy+uint2(x,y)]=node.z;
+}
+
+uint NeighbourDelta(int2 cell,uint lod)
+{
+    if(any(cell<0) || any(cell>=_Grid)) return 0;
+    return (uint)max(0,(int)_LodMap[cell]-(int)lod);
+}
+
+bool Visible(float3 center,float3 extent)
+{
+    if (_FrustumCulling == 0) return true;
+    [unroll] for(int i=0;i<6;i++)
+        if(dot(_Planes[i].xyz,center)+_Planes[i].w+dot(abs(_Planes[i].xyz),extent)<-0.01) return false;
+    return true;
+}
+
+bool Occluded(float3 center,float3 extent)
+{
+    if(_UseHiZ==0) return false;
+    float2 lo=1,hi=0;
+    float nearest=_ReversedZ!=0?0:1;
+    [unroll] for(uint i=0;i<8;i++)
+    {
+        float3 sign=float3((i&1)?1:-1,(i&2)?1:-1,(i&4)?1:-1);
+        float4 clip=mul(_HiZVP,float4(center+extent*sign,1));
+        if(clip.w<=0.0001) return false;
+        float3 ndc=clip.xyz/clip.w;
+        // Near-plane intersections cannot be conservatively tested from these corners.
+        if(ndc.z<0 || ndc.z>1) return false;
+        float2 uv=ndc.xy*0.5+0.5;
+        lo=min(lo,uv);hi=max(hi,uv);
+        nearest=_ReversedZ!=0?max(nearest,ndc.z):min(nearest,ndc.z);
+    }
+    // Only the on-screen part can contribute pixels. Large terrain AABBs often
+    // cross a viewport edge; skipping every such box disables most terrain
+    // occlusion at low camera angles. Test their clamped screen footprint.
+    if(any(hi<0) || any(lo>1)) return false;
+    lo=saturate(lo-_HiZScreenSize.zw*2);hi=saturate(hi+_HiZScreenSize.zw*2);
+    float2 footprint=(hi-lo)*_HiZScreenSize.xy;
+    uint mip=(uint)clamp(floor(log2(max(max(footprint.x,footprint.y),1))),0,_HiZMaxMip);
+    uint2 limit=(uint2)_HiZMipSizes[mip].xy-1;
+    uint2 a=min((uint2)(floor(lo*_HiZScreenSize.xy)/exp2(mip)),limit);
+    uint2 b=min((uint2)(max(ceil(hi*_HiZScreenSize.xy)-1,0)/exp2(mip)),limit);
+    float farthest=_ReversedZ!=0?1:0;
+    for(uint y=a.y;y<=b.y;y++) for(uint x=a.x;x<=b.x;x++)
+    {
+        float d=_HiZ.Load(int3((uint2)_HiZMipOffsets[mip].xy+uint2(x,y),0));
+        farthest=_ReversedZ!=0?min(farthest,d):max(farthest,d);
+    }
+    return _ReversedZ!=0?nearest+_HiZBias<farthest:nearest-_HiZBias>farthest;
+}
+
+[numthreads(8,8,1)]
+void BuildPatches(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
+{
+    // Match upstream: one indirect group per final node, 8x8 threads per group.
+    uint index=group.x+group.y*256;
+    if(index>=_Count.Load(0)) return;
+    uint4 node=_LeafRead[index];
+    int2 p=(int2)node.xy;
+    int side=1<<node.z;
+    uint4 patch=uint4(node.xy*8+local.xy*side,node.z,0);
+    // Only patches on the node's four boundaries can touch another LOD.
+    patch.w=(local.x==0 ? NeighbourDelta(p+int2(-1,0),node.z) : 0)
+        | ((local.y==0 ? NeighbourDelta(p+int2(0,-1),node.z) : 0)<<8)
+        | ((local.x==7 ? NeighbourDelta(p+int2(side,0),node.z) : 0)<<16)
+        | ((local.y==7 ? NeighbourDelta(p+int2(0,side),node.z) : 0)<<24);
+    // Shadow casters must survive main-camera frustum / Hi-Z rejection.
+    _Shadow.Append(patch);
+    float2 patchSize=_Size.xz*exp2(node.z)/_PatchGrid;
+    float2 heights=Heights(patch.xy>>node.z,node.z)*_Size.y+_Origin.y;
+    float3 center=float3(_Origin.x+(patch.x+exp2(node.z)*0.5)*_Size.x/_PatchGrid,
+        (heights.x+heights.y)*0.5,
+        _Origin.z+(patch.y+exp2(node.z)*0.5)*_Size.z/_PatchGrid);
+    float3 extent=float3(patchSize.x*0.5,(heights.y-heights.x)*0.5+_BoundsPadding,patchSize.y*0.5);
+    // A stitched edge interpolates a neighbour's coarse samples, which can lie
+    // outside this fine patch's original height range. Include those heights.
+    float2 range=float2(center.y-extent.y,center.y+extent.y);
+    int2 neighbours[4]={p+int2(-1,0),p+int2(0,-1),p+int2(side,0),p+int2(0,side)};
+    [unroll] for(uint edge=0;edge<4;edge++)
+    {
+        uint delta=(node.w>>(edge*8))&255;
+        if(delta>0)
+        {
+            uint lod=node.z+delta;
+            float2 h=Heights((uint2)neighbours[edge]>>lod,lod+3)*_Size.y+_Origin.y;
+            range=float2(min(range.x,h.x-_BoundsPadding),max(range.y,h.y+_BoundsPadding));
+        }
+    }
+    center.y=(range.x+range.y)*0.5;extent.y=(range.y-range.x)*0.5;
+    if(Visible(center,extent))
+    {
+        uint ignored;
+        _Stats.InterlockedAdd(0,1,ignored);
+        if(Occluded(center,extent)) _Stats.InterlockedAdd(4,1,ignored);
+        else _Visible.Append(patch);
+    }
+}

@@ -1,0 +1,32 @@
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "AVTMaterialBake.hlsl"
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+#pragma kernel KMain
+
+#define BORDER_SIZE 4
+#define SECTOR_SIZE 64.0f
+#define PAGE_SIZE 256.0f
+uint _targetIndex;
+StructuredBuffer<uint> _params;
+RWTexture2DArray<float4> _physicalPageBaseMapAtlas;
+int _basePageScratch;
+RWTexture2DArray<float4> _physicalPageMaskMapAtlas;
+
+[numthreads(4,4,1)]
+void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint mip = _params[4];
+    const uint virtualPageSizeLog = _params[5];
+    const uint2 sector = uint2(_params[0], _params[1]);
+    const uint2 localPageID = uint2(_params[2], _params[3]);
+    const float pagesPerMeter = (1 << (virtualPageSizeLog - mip)) / SECTOR_SIZE;
+    const float metersPerTexel = 1.0 / (PAGE_SIZE * pagesPerMeter);
+    const float2 positionWS = sector * SECTOR_SIZE + (localPageID >> mip) / pagesPerMeter
+        + ((float2)dispatchThreadId.xy - BORDER_SIZE) * metersPerTexel;
+    float4 baseMap, maskMap;
+    BakeTerrainMaterial(positionWS, metersPerTexel, baseMap, maskMap);
+    _physicalPageBaseMapAtlas[uint3(dispatchThreadId.xy, _basePageScratch != 0 ? 0 : _targetIndex)] = baseMap;
+    _physicalPageMaskMapAtlas[uint3(dispatchThreadId.xy, _targetIndex)] = maskMap;
+}
+
+

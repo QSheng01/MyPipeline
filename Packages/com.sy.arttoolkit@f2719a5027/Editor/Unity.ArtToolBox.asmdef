@@ -1,0 +1,18 @@
+{
+    "name": "Unity.ArtToolBox",
+    "rootNamespace": "",
+    "references": [
+        "GUID:84d30b65a98a0934db63ef78c30468f4"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

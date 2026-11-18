@@ -1,0 +1,117 @@
+#pragma max_recursion_depth 1
+#pragma only_renderers d3d11
+
+#include "Assets/Mipipline/PipelineCore/PRTGI/Shaders/PRTBakePayload.hlsl"
+
+RaytracingAccelerationStructure _PRTBakeScene;
+StructuredBuffer<float4> _PRTBakeProbes;
+StructuredBuffer<float4> _PRTBakeDirections;
+RWStructuredBuffer<PRTCaptureSample> _PRTBakeSamples;
+StructuredBuffer<float2> _PRTBakeBiases;
+RWStructuredBuffer<float4> _PRTBakePlacements;
+uint _PRTBakeSampleCount;
+float _PRTBakeSearchDistance;
+
+[shader("raygeneration")]
+void CaptureRayGen()
+{
+    uint2 id = DispatchRaysIndex().xy;
+    float3 origin = _PRTBakeProbes[id.y].xyz;
+    float3 direction = _PRTBakeDirections[id.x].xyz;
+    PRTBakePayload payload = (PRTBakePayload)0;
+    payload.distance = -1.0;
+    payload.seed = id.y * _PRTBakeSampleCount + id.x;
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.001;
+    ray.TMax = 1e30;
+    TraceRay(_PRTBakeScene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0x1, 0, 1, 0, ray, payload);
+    PRTCaptureSample sample = (PRTCaptureSample)0;
+    if (payload.distance < 0.0)
+    {
+        sample.flags = 1u;
+        sample.position = origin + direction;
+    }
+    else
+    {
+        sample.position = origin + direction * payload.distance;
+        sample.normal = payload.normal;
+        sample.albedo = payload.albedo;
+        sample.renderingLayerMask = payload.renderingLayerMask;
+        sample.objectLayerMask = payload.objectLayerMask;
+        sample.materialKey = payload.materialKey;
+    }
+    _PRTBakeSamples[id.y * _PRTBakeSampleCount + id.x] = sample;
+}
+
+float3 PlacementDirection(uint index)
+{
+    uint cell = index < 13 ? index : index + 1;
+    return normalize(float3(int(cell / 9) - 1, int(cell / 3 % 3) - 1, int(cell % 3) - 1));
+}
+
+[shader("raygeneration")]
+void PlacementRayGen()
+{
+    uint probe = DispatchRaysIndex().x;
+    float2 bias = _PRTBakeBiases[probe];
+    float3 position = _PRTBakeProbes[probe].xyz;
+    float3 current = position;
+    float4 result = float4(0, 0, 0, 0);
+    for (uint step = 0; step < 4; step++)
+    {
+        uint front = 0, back = 0;
+        float nearest = 1e30;
+        float nearestNormalY = -2.0;
+        float3 exitPosition = current;
+        for (uint i = 0; i < 26; i++)
+        {
+            float3 direction = PlacementDirection(i);
+            float3 origin = current - direction * bias.y;
+            RayDesc ray;
+            ray.Origin = origin;
+            ray.Direction = direction;
+            ray.TMin = 1e-6;
+            ray.TMax = 1e30;
+            PRTBakePayload payload = (PRTBakePayload)0;
+            payload.distance = -1;
+            TraceRay(_PRTBakeScene, RAY_FLAG_FORCE_OPAQUE, 0x2, 0, 1, 0, ray, payload);
+            if (payload.distance < 0) continue;
+            bool facing = payload.frontFacing != 0u;
+            if (!facing)
+            {
+                ray.TMax = payload.distance * (1.0 + 1e-4) + 1e-4;
+                PRTBakePayload frontPayload = (PRTBakePayload)0;
+                frontPayload.distance = -1;
+                TraceRay(_PRTBakeScene, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+                    0x2, 0, 1, 0, ray, frontPayload);
+                facing = frontPayload.distance >= 0;
+            }
+            if (facing) { front++; continue; }
+            back++;
+            // A probe inside a thin floor can reach its top and bottom faces at the same
+            // distance. Prefer the upward exit so it does not bake beneath the floor.
+            if (payload.distance < nearest - 1e-4 ||
+                (abs(payload.distance - nearest) <= 1e-4 && payload.faceNormal.y > nearestNormalY))
+            {
+                nearest = payload.distance;
+                nearestNormalY = payload.faceNormal.y;
+                exitPosition = origin + direction * payload.distance + payload.faceNormal * bias.x;
+            }
+        }
+        result.xyz = current - position;
+        if (back <= front) { result.w = 1; break; }
+        float3 offset = exitPosition - position;
+        if (dot(offset, offset) > _PRTBakeSearchDistance * _PRTBakeSearchDistance) break;
+        current = exitPosition;
+        result.xyz = current - position;
+    }
+    _PRTBakePlacements[probe] = result;
+}
+
+[shader("miss")]
+void BakeMiss(inout PRTBakePayload payload : SV_RayPayload)
+{
+    payload.distance = -1.0;
+}

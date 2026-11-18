@@ -1,0 +1,218 @@
+using System;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.Universal;
+
+namespace Illusion.Rendering.PathTracing
+{
+    internal sealed partial class PathTracingPass
+    {
+        private class TracePassData
+        {
+            internal PathTracingInlineDispatcher InlineDispatch;
+            internal PathTracingWorld World;
+            internal PathTracingDiffusionProfiles Profiles;
+            internal float SubsurfaceRayBias;
+            internal int Frame;
+            internal PathTracingShaderTime TraceTime;
+            internal PathTracingShaderTime CurrentTime;
+            internal PathTracingSharedScene Scene;
+            internal PathTracingResources Resources;
+            internal IllusionRenderPipelineResources PipelineResources;
+            internal PathTracingLightBaker LightBaker;
+            internal PathTracingSampleConstants Constants;
+            internal Camera Camera;
+            internal Matrix4x4 ViewMatrix;
+            internal Matrix4x4 ProjectionMatrix;
+            internal Matrix4x4 WorldToClip;
+            internal RTHandle ExposureTexture;
+            internal TextureHandle Radiance;
+            internal TextureHandle Depth;
+            internal TextureHandle MotionVectors;
+            internal TextureHandle Throughput;
+            internal TextureHandle SpecularHitT;
+            internal int Width;
+            internal int Height;
+        }
+
+        private class AccumulatePassData
+        {
+            internal ComputeShader Shader;
+            internal int Kernel;
+            internal TextureHandle Radiance;
+            internal TextureHandle Accumulation;
+            internal int Width;
+            internal int Height;
+            internal float Weight;
+        }
+
+        private ComputeShader _accumulationShader;
+
+        private int _accumulateKernel;
+
+        private readonly ProfilingSampler _traceSampler = new("Path Tracing Trace");
+
+        private readonly ProfilingSampler _accumulateSampler = new("Path Tracing Accumulate");
+
+        private void InitializeReference(IllusionRenderPipelineResources resources)
+        {
+            _accumulationShader = resources.pathTracingAccumulationCS;
+            _accumulateKernel = _accumulationShader.FindKernel("Accumulate");
+        }
+
+        private TextureHandle RecordReference(RenderGraph renderGraph, UniversalCameraData cameraData, PathTracing settings,
+            PathTracingCameraContext context, PathTracingWorld world)
+        {
+            int maximumSamples = settings.maximumSamples.value;
+            var camera = cameraData.camera;
+            context.ReleaseRealtime();
+            _rayReconstruction?.Release(camera.GetEntityId().GetHashCode());
+            int width = context.Width;
+            int height = context.Height;
+
+            var worldToView = camera.worldToCameraMatrix;
+            var viewToClip = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, true);
+            var cameraConstants = PathTracingFrameConstants.BuildCamera(camera, width, height, Lens);
+
+            int stateHash = HashCode.Combine(worldToView, viewToClip, world.Scene.SceneHash, _scene.Lights.Hash,
+                HashCode.Combine(PathTracingEnvironment.ComputeHash(_scene.Lights), PathTracingEnvironment.CameraBackground(camera), Lens.ApertureRadius, Lens.FocusDistance, PathTracingDiffusionProfiles.Capture(_rendererData).ComputeHash()),
+                HashCode.Combine(settings.bounceCount.value, settings.diffuseBounceCount.value, settings.lightSampling.value,
+                    settings.referenceFireflyFilterThreshold.value, settings.environmentDiffuseMipOffset.value, settings.layerMask.value));
+            context.UpdateAccumulation(stateHash, world.Scene.TransformsChanged);
+
+            var radiance = renderGraph.ImportTexture(context.Radiance);
+            var accumulation = renderGraph.ImportTexture(context.Accumulation);
+            if (context.SampleCount < (uint)maximumSamples)
+            {
+                var view = PathTracingFrameConstants.BuildView(worldToView, viewToClip, width, height);
+                var previousView = context.HasReferencePreviousView
+                    ? PathTracingFrameConstants.BuildView(context.ReferencePreviousWorldToView, context.ReferencePreviousViewToClip, width, height)
+                    : view;
+                var constants = BuildSampleConstants(view, previousView,
+                    PathTracingFrameConstants.BuildPathTracer(settings, context, cameraConstants, settings.lightSampling.value), width, height);
+                RecordReferenceTrace(renderGraph, context, world, radiance, constants, cameraData, viewToClip * worldToView);
+                RecordAccumulate(renderGraph, radiance, accumulation, width, height, 1.0f / (context.SampleCount + 1));
+                context.AdvanceSample(cameraConstants, worldToView, viewToClip);
+            }
+            return accumulation;
+        }
+
+        private PathTracingSampleConstants BuildSampleConstants(in PathTracingViewConstants view, in PathTracingViewConstants previousView,
+            in PathTracerConstants pathTracer, int width, int height)
+        {
+            return new PathTracingSampleConstants
+            {
+                View = view,
+                PreviousView = previousView,
+                EnvMapSceneParams = PathTracingFrameConstants.BuildEnvironment(true, 1.0f, Quaternion.identity),
+                EnvMapImportanceSamplingParams = new PathTracingEnvMapImportanceSamplingParams
+                {
+                    ImportanceInvDim = Vector2.one / PathTracingEnvironment.ImportanceMapSize,
+                    ImportanceBaseMip = (uint)(_scene.Environment.ImportanceMapMipCount - 1)
+                },
+                PtConsts = pathTracer,
+                Debug = new PathTracingDebugConstants { PickX = -1, PickY = -1, ImageWidth = width, ImageHeight = height }
+            };
+        }
+
+        private void FillTracePassData(RenderGraph renderGraph, TracePassData passData, PathTracingCameraContext context,
+            PathTracingWorld world, TextureHandle radiance, in PathTracingSampleConstants constants, UniversalCameraData cameraData, Matrix4x4 worldToClip)
+        {
+            passData.SubsurfaceRayBias = _rendererData.ScaleWorldDistance(0.001f);
+            passData.Profiles = PathTracingDiffusionProfiles.Capture(_rendererData);
+            passData.World = world;
+            passData.Frame = PathTracingFrame.Index;
+            passData.CurrentTime = PathTracingShaderTime.Current;
+            passData.Scene = _scene;
+            passData.Resources = _scene.Resources;
+            passData.PipelineResources = _rendererData.RuntimeResources;
+            passData.LightBaker = context.GetLightBaker(_scene.LightBakerKernels);
+            passData.Constants = constants;
+            passData.Camera = cameraData.camera;
+            passData.ViewMatrix = cameraData.GetViewMatrix();
+            passData.ProjectionMatrix = cameraData.GetProjectionMatrix();
+            passData.WorldToClip = worldToClip;
+            passData.ExposureTexture = _rendererData.GetExposureTexture();
+            passData.Width = context.Width;
+            passData.Height = context.Height;
+            passData.Radiance = radiance;
+            passData.Depth = renderGraph.ImportTexture(context.Depth);
+            passData.MotionVectors = renderGraph.ImportTexture(context.MotionVectors);
+            passData.Throughput = renderGraph.ImportTexture(context.Throughput);
+            passData.SpecularHitT = renderGraph.ImportTexture(context.SpecularHitT);
+        }
+
+        private static void DeclareTraceTextures(IUnsafeRenderGraphBuilder builder, TracePassData passData)
+        {
+            builder.UseTexture(passData.Radiance, AccessFlags.Write);
+            builder.UseTexture(passData.Depth, AccessFlags.ReadWrite);
+            builder.UseTexture(passData.MotionVectors, AccessFlags.ReadWrite);
+            builder.UseTexture(passData.Throughput, AccessFlags.Write);
+            builder.UseTexture(passData.SpecularHitT, AccessFlags.ReadWrite);
+            builder.AllowPassCulling(false);
+            builder.AllowGlobalStateModification(true);
+        }
+
+        private static void PrepareScene(CommandBuffer cmd, TracePassData data)
+        {
+            data.Scene.Prepare(cmd, data.World, data.LightBaker, data.ExposureTexture, data.Camera.transform.position,
+                data.WorldToClip, data.Width, data.Height, data.Frame, true);
+            data.World.CopyDeformedVertices(cmd);
+            cmd.SetViewProjectionMatrices(data.ViewMatrix, data.ProjectionMatrix);
+        }
+
+        private void RecordReferenceTrace(RenderGraph renderGraph, PathTracingCameraContext context, PathTracingWorld world, TextureHandle radiance,
+            in PathTracingSampleConstants constants, UniversalCameraData cameraData, Matrix4x4 worldToClip)
+        {
+            using var builder = renderGraph.AddUnsafePass<TracePassData>("Path Tracing Trace", out var passData, _traceSampler);
+            FillTracePassData(renderGraph, passData, context, world, radiance, constants, cameraData, worldToClip);
+            passData.InlineDispatch = _inlineReference;
+            passData.TraceTime = context.AccumulationTime;
+            DeclareTraceTextures(builder, passData);
+
+            builder.SetRenderFunc(static (TracePassData data, UnsafeGraphContext graphContext) =>
+            {
+                var cmd = CommandBufferHelpers.GetNativeCommandBuffer(graphContext.cmd);
+                PrepareScene(cmd, data);
+                using (new ProfilingScope(cmd, Samplers.LightFeedback))
+                    data.LightBaker.UpdateEnd(cmd, data.Depth, data.MotionVectors, data.Width, data.Height);
+                data.Resources.UploadConstants(cmd, data.Constants, default);
+                var target = data.InlineDispatch.Target;
+                BindTraceResources(cmd, target, data);
+                data.TraceTime.Push(cmd);
+                using (new ProfilingScope(cmd, Samplers.Paths))
+                {
+                    data.InlineDispatch.Dispatch(cmd, data.Width, data.Height);
+                }
+                data.CurrentTime.Push(cmd);
+            });
+        }
+
+        private void RecordAccumulate(RenderGraph renderGraph, TextureHandle radiance, TextureHandle accumulation,
+            int width, int height, float weight)
+        {
+            using var builder = renderGraph.AddComputePass<AccumulatePassData>("Path Tracing Accumulate", out var passData, _accumulateSampler);
+            passData.Shader = _accumulationShader;
+            passData.Kernel = _accumulateKernel;
+            passData.Radiance = radiance;
+            passData.Accumulation = accumulation;
+            passData.Width = width;
+            passData.Height = height;
+            passData.Weight = weight;
+            builder.UseTexture(radiance);
+            builder.UseTexture(accumulation, AccessFlags.ReadWrite);
+            builder.AllowPassCulling(false);
+
+            builder.SetRenderFunc(static (AccumulatePassData data, ComputeGraphContext context) =>
+            {
+                var cmd = context.cmd;
+                cmd.SetComputeTextureParam(data.Shader, data.Kernel, ShaderIDs._PathTracingRadiance, data.Radiance);
+                cmd.SetComputeTextureParam(data.Shader, data.Kernel, ShaderIDs._PathTracingAccumulation, data.Accumulation);
+                cmd.SetComputeIntParams(data.Shader, ShaderIDs._PathTracingSize, data.Width, data.Height);
+                cmd.SetComputeFloatParam(data.Shader, ShaderIDs._PathTracingSampleWeight, data.Weight);
+                cmd.DispatchCompute(data.Shader, data.Kernel, (data.Width + 7) / 8, (data.Height + 7) / 8, 1);
+            });
+        }
+    }
+}

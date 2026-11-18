@@ -1,0 +1,327 @@
+#pragma kernel CSClear
+#pragma kernel CSBricks
+#pragma kernel CSProbes
+#pragma kernel CSPyramid
+#pragma kernel CSPublish
+#pragma target 5.0
+#pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+#pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
+#pragma multi_compile _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+struct Surfel { uint positionXY; uint positionZAlbedoRG; uint normalAlbedoB; int nearestProbe; };
+struct SurfelIndices { int start; int count; uint renderingLayerMask; uint objectLayerMask; };
+struct BrickFactor { uint brickSh0; uint sh12; uint sh34; uint sh56; uint sh78; };
+struct ProbeData { int factorStart; int factorCount; float3 captureOffset; uint validity; };
+struct PRTWorldLight
+{
+    float4 positionType, directionRange, colorSpot, attenuation;
+    uint renderingLayers, objectLayers;
+    int shadowIndex;
+    uint visibilityEpoch;
+    uint cacheIndex;
+    uint flags;
+};
+
+StructuredBuffer<Surfel> _PRTSurfels;
+StructuredBuffer<SurfelIndices> _PRTBricks;
+StructuredBuffer<BrickFactor> _PRTFactors;
+StructuredBuffer<ProbeData> _PRTProbes;
+StructuredBuffer<int> _PRTProbeIds;
+StructuredBuffer<uint> _PRTSkyVisibility;
+StructuredBuffer<float4> _PRTDirections;
+StructuredBuffer<PRTWorldLight> _PRTLights;
+RWStructuredBuffer<uint> _PRTWorldShadowCache;
+RWStructuredBuffer<uint> _PRTShadowStats;
+TextureCube<float4> _PRTEnvironment;
+SamplerState sampler_PRTEnvironment;
+RWStructuredBuffer<float4> _PRTCommittedSH;
+RWStructuredBuffer<uint> _PRTReady;
+StructuredBuffer<uint> _PRTValidityMasks;
+StructuredBuffer<float4> _PRTPyramidSource;
+RWStructuredBuffer<float4> _PRTPyramidTarget;
+RWStructuredBuffer<float4> _PRTBrickRadiance;
+
+// One atlas: X = grid X, Y = grid Z, Z = grid Y plus the coefficient slice.
+RWTexture3D<float4> _coefficientVoxel3D;
+
+int _PRTBrickCount, _PRTProbeCount, _PRTDirectionCount, _PRTLightCount;
+int _PRTShadowEnabled;
+int _PRTCollectStats;
+int _PRTSurfelCount;
+int3 _PRTGridDimensions;
+int3 _PRTSlots, _PRTSourceCount, _PRTTargetCount, _PRTPublishMinimum, _PRTPublishCount;
+int3 _PRTPyramidOffset, _PRTPyramidSize;
+int3 _PRTPublishWindowMinimum;
+int _PRTCascadeCount, _PRTPublishLevel, _PRTFromProbes;
+float3 _PRTSurfelMin, _PRTSurfelSize;
+float _PRTEnvironmentIntensity;
+
+float PRTBasis(int coefficient, float3 direction)
+{
+    float x = direction.x, y = direction.z, z = direction.y;
+    if (coefficient == 0) return 0.2820947918;
+    if (coefficient == 1) return -0.4886025119 * y;
+    if (coefficient == 2) return 0.4886025119 * z;
+    if (coefficient == 3) return -0.4886025119 * x;
+    if (coefficient == 4) return 1.0925484306 * x * y;
+    if (coefficient == 5) return -1.0925484306 * y * z;
+    if (coefficient == 6) return 0.3153915653 * (3 * z * z - 1);
+    if (coefficient == 7) return -1.0925484306 * x * z;
+    return 0.5462742153 * (x * x - y * y);
+}
+
+float PRTAlbedoChannel(float channel)
+{
+    return channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4);
+}
+
+float3 PRTAlbedo(Surfel surfel)
+{
+    float3 color = float3((surfel.positionZAlbedoRG >> 16) & 0xff,
+        surfel.positionZAlbedoRG >> 24, surfel.normalAlbedoB >> 24) / 255.0;
+    return float3(PRTAlbedoChannel(color.r), PRTAlbedoChannel(color.g), PRTAlbedoChannel(color.b));
+}
+
+float3 PRTNormal(Surfel surfel)
+{
+    float2 e = float2(surfel.normalAlbedoB & 0xfff,
+        (surfel.normalAlbedoB >> 12) & 0xfff) / 4095.0 * 2.0 - 1.0;
+    float3 normal = float3(e, 1.0 - abs(e.x) - abs(e.y));
+    float t = saturate(-normal.z);
+    normal.xy += float2(normal.x >= 0 ? -t : t, normal.y >= 0 ? -t : t);
+    return normalize(normal);
+}
+
+float3 PRTPosition(Surfel surfel)
+{
+    float3 encoded = float3(surfel.positionXY & 0xffff,
+        surfel.positionXY >> 16, surfel.positionZAlbedoRG & 0xffff) / 65535.0;
+    return _PRTSurfelMin + encoded * _PRTSurfelSize;
+}
+
+float PRTMainShadow(float3 position)
+{
+    // Read the shadow atlas directly, including when the camera uses a screen-space shadow variant.
+#if defined(_MAIN_LIGHT_SHADOWS_CASCADE) || defined(_MAIN_LIGHT_SHADOWS_SCREEN)
+    half cascade = ComputeCascadeIndex(position);
+#else
+    half cascade = 0;
+#endif
+    float4 coordinate = float4(mul(_MainLightWorldToShadow[cascade], float4(position, 1.0)).xyz, 0.0);
+    return SampleShadowmap(TEXTURE2D_ARGS(_MainLightShadowmapTexture, sampler_LinearClampCompare),
+        coordinate, GetMainLightShadowSamplingData(), GetMainLightShadowParams(), false);
+}
+
+void PRTShadowStat(uint index)
+{
+    if (_PRTCollectStats != 0) InterlockedAdd(_PRTShadowStats[index], 1);
+}
+
+float3 PRTDirect(float3 position, float3 normal, SurfelIndices range, uint surfelIndex)
+{
+    float3 result = 0;
+    for (int i = 0; i < _PRTLightCount; i++)
+    {
+        PRTWorldLight light = _PRTLights[i];
+        if ((light.objectLayers & range.objectLayerMask) == 0 ||
+            (light.renderingLayers & range.renderingLayerMask) == 0) continue;
+        float3 direction;
+        float attenuation = 1;
+        if (light.positionType.w < 0.5) direction = light.directionRange.xyz;
+        else
+        {
+            float3 delta = light.positionType.xyz - position;
+            float distance = length(delta);
+            float radius = light.directionRange.w;
+            if (distance >= radius || distance < 0.0001) continue;
+            direction = delta / distance;
+            attenuation = saturate(1.0 - distance * distance / (radius * radius));
+            attenuation = attenuation * attenuation / max(1.0, distance * distance);
+            if (light.positionType.w > 1.5)
+            {
+                float angle = dot(-light.directionRange.xyz, -direction);
+                attenuation *= smoothstep(light.attenuation.x, light.attenuation.y, angle);
+            }
+        }
+        float visibility = 1.0;
+        bool sampled = false;
+        if (_PRTShadowEnabled != 0 && light.shadowIndex == -2)
+        {
+            visibility = PRTMainShadow(position + normal * 0.02);
+            sampled = true;
+        }
+        else if (_PRTShadowEnabled != 0 && light.shadowIndex >= 0)
+        {
+            visibility = AdditionalLightRealtimeShadow(light.shadowIndex, position + normal * 0.02, direction);
+            sampled = true;
+        }
+        if (_PRTShadowEnabled != 0 && light.cacheIndex != 0xffffffffu)
+        {
+            PRTShadowStat(0);
+            uint cache = light.cacheIndex * (uint)_PRTSurfelCount + surfelIndex;
+            if (sampled)
+            {
+                _PRTWorldShadowCache[cache] = (light.visibilityEpoch << 8) | (uint)round(saturate(visibility) * 255.0);
+                PRTShadowStat(4);
+            }
+            else
+            {
+                PRTShadowStat(2);
+                uint previous = _PRTWorldShadowCache[cache];
+                if ((previous >> 8) == light.visibilityEpoch)
+                {
+                    visibility = (previous & 0xffu) / 255.0;
+                    PRTShadowStat(1);
+                }
+                else PRTShadowStat(3);
+            }
+        }
+        result += light.colorSpot.rgb * (attenuation * max(0, dot(normal, direction)) * visibility / 3.14159265);
+    }
+    return result;
+}
+
+float3 PRTFeedback(int probe, float3 normal)
+{
+    if (probe < 0 || _PRTReady[probe] == 0) return 0;
+    uint mask = _PRTValidityMasks[probe];
+    float intensity = (mask & 0xffffffu) * (5.0 / 16777215.0);
+    float validity = (mask >> 24) / 255.0;
+    if (validity <= 0) return 0;
+    float3 result = 0;
+    for (int c = 0; c < 9; c++)
+    {
+        float cosine = c == 0 ? 1.0 : c < 4 ? 2.0 / 3.0 : 0.25;
+        result += _PRTCommittedSH[probe * 9 + c].rgb * (PRTBasis(c, normal) * cosine);
+    }
+    return max(result, 0) * intensity;
+}
+
+float PRTFactor(BrickFactor factor, int coefficient)
+{
+    uint word = coefficient == 0 ? factor.brickSh0 : coefficient <= 2 ? factor.sh12 :
+        coefficient <= 4 ? factor.sh34 : coefficient <= 6 ? factor.sh56 : factor.sh78;
+    uint bits = coefficient == 0 || (coefficient & 1) == 0 ? word >> 16 : word & 0xffff;
+    return f16tof32(bits);
+}
+
+[numthreads(4, 4, 4)]
+void CSClear(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_PRTSlots)) return;
+    for (int slice = 0; slice < _PRTCascadeCount * 9; slice++)
+        _coefficientVoxel3D[int3(id.x, id.z, id.y + slice * _PRTSlots.y)] = 0;
+}
+
+[numthreads(32, 1, 1)]
+void CSBricks(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_PRTBrickCount) return;
+    SurfelIndices range = _PRTBricks[id.x];
+    float3 result = 0;
+    for (int index = range.start; index < range.start + range.count; index++)
+    {
+        Surfel surfel = _PRTSurfels[index];
+        float3 normal = PRTNormal(surfel);
+        float3 lighting = PRTDirect(PRTPosition(surfel), normal, range, (uint)index) + PRTFeedback(surfel.nearestProbe, normal);
+        result += PRTAlbedo(surfel) * lighting;
+    }
+    _PRTBrickRadiance[id.x] = float4(range.count > 0 ? result / range.count : 0, 0);
+}
+
+[numthreads(32, 1, 1)]
+void CSProbes(uint3 id : SV_DispatchThreadID)
+{
+    uint local = id.x;
+    if (local >= (uint)_PRTProbeCount) return;
+    int global = _PRTProbeIds[local];
+    ProbeData probe = _PRTProbes[local];
+    float3 coefficients[9];
+    for (int c = 0; c < 9; c++) coefficients[c] = 0;
+    for (int index = probe.factorStart; index < probe.factorStart + probe.factorCount; index++)
+    {
+        BrickFactor factor = _PRTFactors[index];
+        float3 value = _PRTBrickRadiance[factor.brickSh0 & 0xffff].rgb;
+        for (int c = 0; c < 9; c++) coefficients[c] += value * PRTFactor(factor, c);
+    }
+    int words = (_PRTDirectionCount + 31) / 32;
+    for (int direction = 0; direction < _PRTDirectionCount; direction++)
+    {
+        if ((_PRTSkyVisibility[local * words + direction / 32] & (1u << (direction & 31))) == 0) continue;
+        float4 sample = _PRTDirections[direction];
+        float3 environment = _PRTEnvironment.SampleLevel(sampler_PRTEnvironment, sample.xyz, 0).rgb * _PRTEnvironmentIntensity;
+        for (int c = 0; c < 9; c++) coefficients[c] += environment * sample.w * PRTBasis(c, sample.xyz);
+    }
+    for (int coefficient = 0; coefficient < 9; coefficient++)
+        _PRTCommittedSH[global * 9 + coefficient] = float4(coefficients[coefficient], 0);
+    _PRTReady[global] = 1;
+}
+
+uint PRTIndex(int3 node, int3 dimensions)
+{
+    return (uint)((node.x * dimensions.y + node.y) * dimensions.z + node.z);
+}
+
+[numthreads(4, 4, 4)]
+void CSPyramid(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_PRTPyramidSize)) return;
+    int3 node = _PRTPyramidOffset + int3(id);
+    float4 sum[9];
+    for (int coefficient = 0; coefficient < 9; coefficient++) sum[coefficient] = 0;
+    float totalWeight = 0;
+    for (int dx = -1; dx <= 1; dx++)
+    for (int dy = -1; dy <= 1; dy++)
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        int3 fine = node * 2 + int3(dx, dy, dz);
+        if (any(fine < 0) || any(fine >= _PRTSourceCount)) continue;
+        float weight = (dx == 0 ? 0.5 : 0.25) * (dy == 0 ? 0.5 : 0.25) * (dz == 0 ? 0.5 : 0.25);
+        totalWeight += weight;
+        uint index = PRTIndex(fine, _PRTSourceCount);
+        if (_PRTFromProbes != 0)
+        {
+            uint mask = _PRTReady[index] != 0 ? _PRTValidityMasks[index] : 0;
+            float intensity = (mask & 0xffffffu) * (5.0 / 16777215.0);
+            float validity = (mask >> 24) / 255.0;
+            for (int coefficient = 0; coefficient < 9; coefficient++)
+                sum[coefficient] += weight * float4(
+                    _PRTCommittedSH[index * 9 + coefficient].rgb * intensity * validity, validity);
+        }
+        else
+        {
+            for (int coefficient = 0; coefficient < 9; coefficient++)
+                sum[coefficient] += weight * _PRTPyramidSource[index * 9 + coefficient];
+        }
+    }
+    uint target = PRTIndex(node, _PRTTargetCount);
+    for (int coefficient = 0; coefficient < 9; coefficient++)
+        _PRTPyramidTarget[target * 9 + coefficient] = totalWeight > 0 ? sum[coefficient] / totalWeight : 0;
+}
+
+[numthreads(8, 4, 8)]
+void CSPublish(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_PRTPublishCount)) return;
+    int3 node = _PRTPublishMinimum + int3(id);
+    uint index = PRTIndex(node, _PRTSourceCount);
+    float intensity = 1, validity = 1;
+    if (_PRTPublishLevel == 0)
+    {
+        uint mask = _PRTReady[index] != 0 ? _PRTValidityMasks[index] : 0;
+        intensity = (mask & 0xffffffu) * (5.0 / 16777215.0);
+        validity = (mask >> 24) / 255.0;
+    }
+    for (int coefficient = 0; coefficient < 9; coefficient++)
+    {
+        float4 value = _PRTPublishLevel == 0
+            ? float4(_PRTCommittedSH[index * 9 + coefficient].rgb * intensity * validity, validity)
+            : _PRTPyramidSource[index * 9 + coefficient];
+        _coefficientVoxel3D[int3(node.x % _PRTSlots.x, node.z % _PRTSlots.z,
+            node.y - _PRTPublishWindowMinimum.y + (_PRTPublishLevel * 9 + coefficient) * _PRTSlots.y)] = value;
+    }
+}

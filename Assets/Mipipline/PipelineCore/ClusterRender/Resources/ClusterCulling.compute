@@ -1,0 +1,182 @@
+#pragma kernel ClearArgs
+#pragma kernel Cull
+
+struct ClusterData
+{
+    float3 extent;
+    float3 position;
+    int index;
+};
+
+StructuredBuffer<ClusterData> clusterBuffer;
+RWStructuredBuffer<uint> visibleIndices;
+RWStructuredBuffer<uint> argsBuffer;
+
+float4 _FrustumPlanes[6];
+float4x4 _LocalToWorld;
+Texture2D<float> _HiZDepthTexture;
+float4 _HiZScreenSize;
+float4x4 _ViewProjection;
+uint _HiZMaxMip;
+float4 _HiZMipOffsets[16];
+float4 _HiZMipSizes[16];
+float _HiZOcclusionBias;
+float _UseHiZOcclusion;
+uint _ClusterCount;
+uint _HiZReversedZ;
+
+float3 TransformExtent(float3 extent)
+{
+    return float3(
+        abs(_LocalToWorld._m00) * extent.x + abs(_LocalToWorld._m01) * extent.y + abs(_LocalToWorld._m02) * extent.z,
+        abs(_LocalToWorld._m10) * extent.x + abs(_LocalToWorld._m11) * extent.y + abs(_LocalToWorld._m12) * extent.z,
+        abs(_LocalToWorld._m20) * extent.x + abs(_LocalToWorld._m21) * extent.y + abs(_LocalToWorld._m22) * extent.z);
+}
+
+bool IsVisible(ClusterData cluster)
+{
+    float3 center = mul(_LocalToWorld, float4(cluster.position, 1)).xyz;
+    float3 extent = TransformExtent(cluster.extent);
+
+    [unroll]
+    for (uint planeIndex = 0; planeIndex < 6; ++planeIndex)
+    {
+        float4 plane = _FrustumPlanes[planeIndex];
+        float radius = dot(abs(plane.xyz), extent);
+        if (dot(plane.xyz, center) + plane.w < -radius)
+            return false;
+    }
+
+    return true;
+}
+
+static const float3 BoxCorners[8] =
+{
+    float3(-1, -1, -1),
+    float3(-1, -1,  1),
+    float3(-1,  1, -1),
+    float3(-1,  1,  1),
+    float3( 1, -1, -1),
+    float3( 1, -1,  1),
+    float3( 1, 1, -1),
+    float3( 1, 1,  1)
+};
+
+float LoadPackedHiZ(uint2 localPosition, uint2 mipOffset)
+{
+    return _HiZDepthTexture.Load(int3(mipOffset + localPosition, 0));
+}
+
+float SamplePackedHiZRegion(float2 regionMinUv, float2 regionMaxUv, uint mipIndex)
+{
+    uint2 mipSize = max((uint2)_HiZMipSizes[mipIndex].xy, uint2(1, 1));
+    uint2 mipOffset = (uint2)_HiZMipOffsets[mipIndex].xy;
+    // The packed pyramid uses ceil-halving for NPOT dimensions. Mapping UVs
+    // directly against each mip size therefore shifts the footprint at levels
+    // such as 1080 -> 540 -> 270 -> ... -> 9. Convert through base-level
+    // pixels first, then fold those pixels into the mip footprint.
+    float2 baseSize = _HiZScreenSize.xy;
+    float2 minPixel = floor(saturate(regionMinUv) * baseSize);
+    float2 maxPixel = ceil(saturate(regionMaxUv) * baseSize) - 1.0;
+    float mipScale = exp2((float)mipIndex);
+    uint2 minTexel = min((uint2)floor(minPixel / mipScale), mipSize - 1);
+    uint2 maxTexel = min((uint2)floor(maxPixel / mipScale), mipSize - 1);
+
+    float occluderDepth = _HiZReversedZ != 0 ? 1 : 0;
+    [loop]
+    for (uint y = minTexel.y; y <= maxTexel.y; ++y)
+    {
+        [loop]
+        for (uint x = minTexel.x; x <= maxTexel.x; ++x)
+        {
+            float depth = LoadPackedHiZ(uint2(x, y), mipOffset);
+            occluderDepth = _HiZReversedZ != 0
+                ? min(occluderDepth, depth)
+                : max(occluderDepth, depth);
+        }
+    }
+    return occluderDepth;
+}
+
+bool IsOccluded(ClusterData cluster)
+{
+    float nearestDepth = _HiZReversedZ != 0 ? 0 : 1;
+    float2 minUv = float2(1, 1);
+    float2 maxUv = float2(0, 0);
+
+    [unroll]
+    for (uint cornerIndex = 0; cornerIndex < 8; ++cornerIndex)
+    {
+        float3 worldPosition = mul(
+            _LocalToWorld,
+            float4(cluster.position + cluster.extent * BoxCorners[cornerIndex], 1)).xyz;
+        float4 clipPosition = mul(_ViewProjection, float4(worldPosition, 1));
+
+        if (clipPosition.w <= 0.0001)
+            return false;
+
+        float3 ndcPosition = clipPosition.xyz / clipPosition.w;
+        float2 uv = ndcPosition.xy * 0.5 + 0.5;
+        minUv = min(minUv, uv);
+        maxUv = max(maxUv, uv);
+
+        nearestDepth = _HiZReversedZ != 0
+            ? max(nearestDepth, ndcPosition.z)
+            : min(nearestDepth, ndcPosition.z);
+    }
+
+    if (maxUv.x < 0 || maxUv.y < 0 || minUv.x > 1 || minUv.y > 1)
+        return false;
+
+    // Expand the test footprint by one source-depth texel. Projected AABBs
+    // often end exactly on a raster boundary; without this guard a tiny
+    // projection or rounding difference can select only the foreground side
+    // of a depth discontinuity and incorrectly reject the cluster.
+    float2 hizTexel = _HiZScreenSize.zw;
+    minUv = saturate(minUv - hizTexel);
+    maxUv = saturate(maxUv + hizTexel);
+
+    float2 footprint = (maxUv - minUv) * _HiZScreenSize.xy;
+    float footprintSize = max(footprint.x, footprint.y);
+    // Keep one finer level than the common ceil(log2(size)) selection. The
+    // projected bounds then cover only a small texel range, which we inspect
+    // completely instead of assuming that four corner samples cover it.
+    float mip = floor(log2(max(footprintSize, 1)));
+    mip = min(max(mip, 0), (float)_HiZMaxMip);
+
+    uint mipIndex = (uint)mip;
+    float occluderDepth = SamplePackedHiZRegion(minUv, maxUv, mipIndex);
+
+    return _HiZReversedZ != 0
+        ? nearestDepth + _HiZOcclusionBias < occluderDepth
+        : nearestDepth - _HiZOcclusionBias > occluderDepth;
+}
+
+[numthreads(1, 1, 1)]
+void ClearArgs(uint3 id : SV_DispatchThreadID)
+{
+    argsBuffer[0] = 384;
+    argsBuffer[1] = 0;
+    argsBuffer[2] = 0;
+    argsBuffer[3] = 0;
+}
+
+[numthreads(64, 1, 1)]
+void Cull(uint3 id : SV_DispatchThreadID)
+{
+    uint clusterIndex = id.x;
+    if (clusterIndex >= _ClusterCount)
+        return;
+
+    ClusterData cluster = clusterBuffer[clusterIndex];
+    // Frustum rejection is always required. Hi-Z rejection is optional and
+    // must be disabled per draw when no valid depth pyramid is available.
+    // Keep the test conservative: clusters that touch the Hi-Z depth or fall
+    // outside the projected footprint remain visible.
+    if (IsVisible(cluster) && (!_UseHiZOcclusion || !IsOccluded(cluster)))
+    {
+        uint visibleIndex;
+        InterlockedAdd(argsBuffer[1], 1, visibleIndex);
+        visibleIndices[visibleIndex] = clusterIndex;
+    }
+}

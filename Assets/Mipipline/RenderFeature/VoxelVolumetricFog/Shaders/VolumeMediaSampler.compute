@@ -1,0 +1,127 @@
+#pragma kernel CSMain
+
+#include "VoxelVolumetricCommon.hlsl"
+
+RWTexture3D<float4> MediaData;
+Texture3D<float4> MediaDataPrevious;
+
+float _FogDensity;
+float4 _GlobalScatteringAndExtinction;
+Texture3D _VoxelNoiseTexture;
+float _VoxelNoiseTiling;
+float _NoiseIntensityMin;
+float _NoiseIntensityMax;
+float3 _NoiseWindSpeed;
+float _InverseNoiseScale;
+float _BaseHeight;
+float _AttenuationBoundarySize;
+
+#define MAX_VOLUME_COUNT 8
+int _LocalVolumeCount;
+float4x4 _LocalFogMatrix[MAX_VOLUME_COUNT];
+float _LocalVolumeIntensity[MAX_VOLUME_COUNT]; // Intensity scalar
+int _VolumeBlendMode[MAX_VOLUME_COUNT]; // BlendMode per Volume
+float _VolumeBlendDistance[MAX_VOLUME_COUNT]; // Blend Distance per Volume
+
+//雾效范围
+float GetFogFalloff(float3 positionWS)
+{
+	float a = 1.0 * _FogDensity;
+	float x = 0.0;
+	int xo = 0;
+
+	//局部雾效
+	[loop]
+	for (int i = 0; i < _LocalVolumeCount; i++)
+	{
+		float d = 0;
+		float4 posFogSpace = mul(_LocalFogMatrix[i], float4(positionWS,1));
+
+		d = LocalFogBox(posFogSpace.rgb);
+		float2 staticRemapVals = float2(_LocalVolumeIntensity[i], 0);
+		float2 remapVals = float2(_LocalVolumeIntensity[i], 1);
+		
+		remapVals = lerp(remapVals, staticRemapVals, _VolumeBlendMode[i]);
+		xo = lerp(xo, 1, _VolumeBlendMode[i]);
+		
+		float v = Remap0N(_VolumeBlendDistance[i], remapVals.x, remapVals.y, d);
+
+		a *= lerp(v, 1, _VolumeBlendMode[i]);
+		x += lerp(0.0, v*0.01f, _VolumeBlendMode[i]);
+	}
+	
+	a = lerp(a, x, xo);
+
+	return a;
+}
+
+//高度衰减
+float _Inverse_AttenuationBoundarySize;
+float GetFogDensityByHeight(float3 positionWS)
+{
+	float height = max(positionWS.y - _BaseHeight, 0.0);
+	return exp(-height * _Inverse_AttenuationBoundarySize);
+}
+
+//噪声扰动
+float3 _WindOffsetVoxel;
+float GetNoise(float3 positionWS, float invNoiseScale)
+{
+    float3 uvw = positionWS * invNoiseScale;
+	float3 wind = _WindOffsetVoxel * invNoiseScale;
+	
+	float amp = 1.0;
+	float4 value = 0;
+	
+	value += amp * SAMPLE_TEXTURE3D_LOD(_VoxelNoiseTexture, voxel_linear_repeat_sampler, uvw - wind * _Time.y, 0);
+
+	float v = value.r * 0.53 + value.g * 0.27 + value.b * 0.13 + value.a * 0.07;
+	v = InverseLerp(_NoiseIntensityMin, _NoiseIntensityMax, v);
+	return saturate(v);
+}
+
+float _TemporalIntegration_Media;
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= (uint)fog_volume_size.x || id.y >= (uint)fog_volume_size.y || id.z >= (uint)fog_volume_size.z)
+        return;
+	
+    float3 uvw = IdToUVW(id, fog_cell_size);
+	float3 uvwJittered = uvw;
+	//  TAA
+	//#ifdef ENABLE_REPROJECTION
+    // 	float3 r = halton[GetHaltonId(id)] - 0.5;
+	//    uvwJittered = saturate(uvw + (r * fog_cell_size));
+	//#endif
+	
+    float3 rayDirectionWS = GetRayDirectionCompute(uvwJittered.xy);
+		
+	float3 positionWS = DirectionAndDistanceToWorldPosition(rayDirectionWS, uvwJittered.z);
+	float fogDensity = GetFogFalloff(positionWS);
+	fogDensity *= GetFogDensityByHeight(positionWS);
+    if(_VoxelNoiseTiling!=0)
+	    fogDensity *= GetNoise(positionWS, _InverseNoiseScale);
+
+	
+	float4 newResult = float4(_GlobalScatteringAndExtinction.rgb, _GlobalScatteringAndExtinction.w*fogDensity);
+
+	//  TAA 这边的降噪不做了，到光照计算部分一起降噪
+	//#ifdef ENABLE_REPROJECTION
+	//{
+	//	ReprojectionData reprojectionData = CalculateReprojection(uvw);
+	//	float integrationAmount = 1.0;
+	//	float4 previousValue = 0.0;
+	//	
+	//	if(reprojectionData.isValid)
+	//	{
+	//		integrationAmount = _TemporalIntegration_Media; 
+	//		previousValue = MediaDataPrevious.SampleLevel(voxel_linear_clamp_sampler, reprojectionData.uvwPrevious, 0).rgba;
+	//	}
+////
+	//	newResult = lerp(previousValue, newResult, integrationAmount);
+	//}
+	//#endif
+	
+    MediaData[id.xyz] = newResult;
+}

@@ -1,0 +1,129 @@
+using System;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Illusion.Rendering.PathTracing
+{
+    internal sealed class PathTracingWorld : IDisposable
+    {
+        private int _builtFrame = -1;
+
+        private int _motionFrame = -1;
+
+        private bool _gatherPending;
+
+        private bool _historyAssigned;
+
+        public PathTracingScene Scene { get; } = new();
+
+        public PathTracingEmissiveTable Emissive { get; }
+
+        public PathTracingMotionHistory Motion { get; }
+
+        private readonly ComputeShader _motionShader;
+
+        private readonly ComputeShader _micromapShader;
+
+        public PathTracingInlineScene Inline { get; } = new();
+
+        public int LastUsedFrame { get; private set; }
+
+        public PathTracingWorld(ComputeShader emissiveShader, ComputeShader motionShader, ComputeShader micromapShader)
+        {
+            Emissive = new PathTracingEmissiveTable(emissiveShader);
+            Motion = new PathTracingMotionHistory(motionShader);
+            _motionShader = motionShader;
+            _micromapShader = micromapShader;
+        }
+
+        public void Update(Camera camera, int layerMask, bool trackMotion)
+        {
+            LastUsedFrame = PathTracingFrame.Index;
+            bool collected = Scene.Update(camera, layerMask);
+            if (collected)
+            {
+                Emissive.BeginFrame();
+                if (Scene.Instances.Changed)
+                {
+                    Emissive.Update(Scene.Instances);
+                    _historyAssigned = false;
+                }
+            }
+            bool assign = false;
+            if (trackMotion)
+            {
+                int motionFrame = Application.isPlaying ? Time.frameCount : PathTracingFrame.Index;
+                if (_motionFrame != motionFrame)
+                {
+                    _motionFrame = motionFrame;
+                    Motion.Advance(Scene.Instances);
+                    _gatherPending = true;
+                    assign = true;
+                }
+                else if (!_historyAssigned)
+                {
+                    Motion.Assign(Scene.Instances);
+                    assign = true;
+                }
+                _historyAssigned = true;
+            }
+            if (assign)
+                Scene.Instances.Upload();
+        }
+
+        public void Build(CommandBuffer cmd, int frame)
+        {
+            if (_builtFrame != frame)
+            {
+                _builtFrame = frame;
+                Inline.RecordOpacityMicromaps(cmd, _micromapShader);
+                cmd.BuildRayTracingAccelerationStructure(Scene.AccelerationStructure);
+            }
+            if (_gatherPending)
+            {
+                _gatherPending = false;
+                Motion.Gather(cmd);
+            }
+        }
+
+        public void UpdateInline()
+        {
+            Inline.Update(Scene.Instances, PathTracingFrame.Index);
+        }
+
+        public void CopyDeformedVertices(CommandBuffer cmd)
+        {
+            Inline.CopyDeformedVertices(cmd, PathTracingFrame.Index, _motionShader);
+        }
+
+        public void BindInline(CommandBuffer cmd, PathTracingShaderTarget shader)
+        {
+            Inline.Bind(cmd, shader);
+            shader.SetBuffer(cmd, ShaderIDs._PathTracingInstanceData, Scene.Instances.Buffer);
+            shader.SetInt(cmd, ShaderIDs._PathTracingOpaqueShadowLayers, unchecked((int)Scene.Instances.OpaqueShadowLayers));
+            shader.SetBuffer(cmd, ShaderIDs._PathTracingCulledSubMeshes, Scene.Instances.CulledSubMeshBuffer);
+            shader.SetBuffer(cmd, ShaderIDs._PathTracingPreviousPositions, Motion.PreviousPositions);
+            shader.SetBuffer(cmd, ShaderIDs._PathTracingMaterialRanges, Scene.Instances.MaterialTable.RangeBuffer);
+            shader.SetBuffer(cmd, ShaderIDs._PathTracingSubMeshMaterials, Scene.Instances.MaterialTable.SubMeshBuffer);
+            Scene.Instances.MaterialTable.Bind(cmd, shader);
+        }
+
+        public void Dispose()
+        {
+            Scene.Dispose();
+            Inline.Dispose();
+            Emissive.Dispose();
+            Motion.Dispose();
+        }
+
+        private static class ShaderIDs
+        {
+            public static readonly int _PathTracingInstanceData = Shader.PropertyToID("_PathTracingInstanceData");
+            public static readonly int _PathTracingOpaqueShadowLayers = Shader.PropertyToID("_PathTracingOpaqueShadowLayers");
+            public static readonly int _PathTracingCulledSubMeshes = Shader.PropertyToID("_PathTracingCulledSubMeshes");
+            public static readonly int _PathTracingPreviousPositions = Shader.PropertyToID("_PathTracingPreviousPositions");
+            public static readonly int _PathTracingMaterialRanges = Shader.PropertyToID("_PathTracingMaterialRanges");
+            public static readonly int _PathTracingSubMeshMaterials = Shader.PropertyToID("_PathTracingSubMeshMaterials");
+        }
+    }
+}

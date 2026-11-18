@@ -1,0 +1,6 @@
+{
+  "name": "Illusion.RenderPipelines",
+  "rootNamespace": "Illusion.Rendering.PRTGI",
+  "references": ["Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
+  "autoReferenced": true
+}

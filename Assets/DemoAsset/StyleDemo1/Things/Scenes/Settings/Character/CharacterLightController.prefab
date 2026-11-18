@@ -1,0 +1,80 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &8018096333477056908
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5788940159098721493}
+  - component: {fileID: 1047871714046699241}
+  - component: {fileID: 1991541574}
+  m_Layer: 0
+  m_Name: CharacterLightController
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5788940159098721493
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8018096333477056908}
+  m_LocalRotation: {x: 0.057666156, y: 0.9420843, z: -0.22217847, w: 0.24451685}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 26.54, y: 150.9, z: 0}
+--- !u!114 &1047871714046699241
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8018096333477056908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5b814162424b1442889ab8fd4db5184, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  lightSourceType: 0
+  isRestrictCharacterLightDir: 1
+  intensity: 0.58
+  shadowStrength: 0.5
+  isCustomColor: 1
+  lightColor: {r: 1, g: 1, b: 1, a: 1}
+  followCamera: {fileID: 0}
+  followCameraOffset: {x: 0, y: 0, z: 0}
+  ambientAddColor: {r: 0, g: 0, b: 0, a: 1}
+  ambientAddIntensity: 1
+  bakeAmbientColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  bakeAmbientColorWeight: 1
+  bakeAmbientIntensity: 1
+  envColor: {r: 1, g: 0.9843138, b: 0.89019614, a: 1}
+  specularColor: {r: 1, g: 1, b: 1, a: 0.12}
+  specularIntensity: 0.12
+  rimColor: {r: 1, g: 1, b: 1, a: 0}
+  rimIntensity: 0
+  isDebug: 1
+--- !u!114 &1991541574
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8018096333477056908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ca14dd0fc315ec944a49f0352e225d47, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  isRealVision: 0
+  isDistantView: 0
+  closeShadow: 1

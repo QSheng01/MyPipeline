@@ -1,0 +1,60 @@
+#pragma kernel CSMain
+#pragma target 5.0
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SphericalHarmonics.hlsl"
+
+TextureCube<float4> _inputCubemap;
+SamplerState sampler_point_clamp;
+StructuredBuffer<float4> _sampleDirections;
+RWStructuredBuffer<float> _coefficientSH9;
+uint _sampleCount;
+
+groupshared float3 coefficients[128];
+
+float Basis(uint coefficient, float3 dir)
+{
+    float x = dir.x, y = dir.y, z = dir.z;
+    if (coefficient == 0) return kSHBasisCoef[0];
+    if (coefficient == 1) return kSHBasisCoef[1] * y;
+    if (coefficient == 2) return kSHBasisCoef[2] * z;
+    if (coefficient == 3) return kSHBasisCoef[3] * x;
+    if (coefficient == 4) return kSHBasisCoef[4] * x * y;
+    if (coefficient == 5) return kSHBasisCoef[5] * y * z;
+    if (coefficient == 6) return kSHBasisCoef[6] * (3 * z * z - 1);
+    if (coefficient == 7) return kSHBasisCoef[7] * x * z;
+    return kSHBasisCoef[8] * (x * x - y * y);
+}
+
+[numthreads(128, 1, 1)]
+void CSMain(uint lane : SV_GroupIndex)
+{
+    for (uint coefficient = 0; coefficient < 9; coefficient++)
+    {
+        float3 sum = 0;
+        for (uint block = 0; block < 4; block++)
+        {
+            uint sample = block * 128 + lane;
+            if (sample < _sampleCount)
+            {
+                float4 direction = _sampleDirections[sample];
+                sum += _inputCubemap.SampleLevel(sampler_point_clamp, direction.xyz, 0).rgb *
+                    (Basis(coefficient, direction.xyz) * direction.w);
+            }
+        }
+        coefficients[lane] = sum;
+        GroupMemoryBarrierWithGroupSync();
+        for (uint stride = 64; stride > 0; stride >>= 1)
+        {
+            if (lane < stride) coefficients[lane] += coefficients[lane + stride];
+            GroupMemoryBarrierWithGroupSync();
+        }
+        if (lane == 0)
+        {
+            _coefficientSH9[coefficient * 3 + 0] = coefficients[0].r;
+            _coefficientSH9[coefficient * 3 + 1] = coefficients[0].g;
+            _coefficientSH9[coefficient * 3 + 2] = coefficients[0].b;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+}

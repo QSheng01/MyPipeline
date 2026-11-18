@@ -1,0 +1,35 @@
+# 3ds Max Wavefront OBJ Exporter v0.97b - (c)2007 guruware
+# File Created: 19.03.2021 17:06:35
+
+mtllib cao002_lod03.mtl
+
+#
+# object cao002
+#
+
+v  -2.3557 31.8985 -2.5646
+v  2.3557 31.8985 -2.5646
+v  0.0000 72.4711 -12.1886
+v  0.0000 0.0030 -0.0000
+# 4 vertices
+
+vn -0.0000 0.3068 0.9518
+vn -0.0000 0.3437 0.9391
+vn -0.0000 -0.0000 1.0000
+vn -0.0000 0.0136 0.9999
+# 4 vertex normals
+
+vt 0.4679 0.4085 0.0000
+vt 0.5309 0.4085 0.0000
+vt 0.4994 0.9891 0.0000
+vt 0.4994 0.0172 0.0000
+# 4 texture coords
+
+o cao002
+g cao002
+usemtl wire_087225198
+s off
+f 1/1/1 2/2/1 3/3/2 
+f 4/4/3 2/2/3 1/1/4 
+# 0 polygons - 2 triangles
+

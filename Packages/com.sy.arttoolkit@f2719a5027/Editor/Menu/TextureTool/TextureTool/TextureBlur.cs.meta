@@ -1,0 +1,32 @@
+fileFormatVersion: 2
+guid: b39c378c2b704a8498a8bf056faf66c5
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - m_ViewDataDictionary: {instanceID: 0}
+  - "\u7A97\u53E3\u80CC\u666F\u56FE": {fileID: 2800000, guid: e209ea6e80c1ba94aa7e43e95c5a7838, type: 3}
+  - "\u539F\u56FE": {instanceID: 0}
+  - "\u9884\u89C8\u56FE": {fileID: 2800000, guid: 6c8daab694b3d3d44a1cd9fc23ec4028, type: 3}
+  - "\u653E\u5C04\u56FE": {fileID: 2800000, guid: 5a94e770b6cb6294f852b2cfa6bfb787, type: 3}
+  - ShurukuangTex: {fileID: 2800000, guid: 6c8daab694b3d3d44a1cd9fc23ec4028, type: 3}
+  - btn01tex0: {fileID: 2800000, guid: e1fcacd71cea29d459b60f3f5376d3d0, type: 3}
+  - btn01tex1: {fileID: 2800000, guid: 449dd19ce611c8e40997eb98b23f0b28, type: 3}
+  - btn01tex2: {fileID: 2800000, guid: d65e7ae6c6aaedf44b69c1b2fc5d5385, type: 3}
+  - btn01tex3: {fileID: 2800000, guid: 74e6785db743665489cef0ac5fb32432, type: 3}
+  - btn01tex4: {fileID: 2800000, guid: f4d0eff4afe7f6449bf48176724fd5db, type: 3}
+  - btn01tex5: {fileID: 2800000, guid: c8f533185de84a0459d4f8348d968c9c, type: 3}
+  - "\u9884\u89C8Shader": {instanceID: 0}
+  - "\u9884\u89C8\u6750\u8D28\u7403": {instanceID: 0}
+  - "\u653E\u5C04\u6750\u8D28\u7403": {instanceID: 0}
+  - gsblur: {instanceID: 0}
+  - fsblur: {instanceID: 0}
+  - rsblur: {instanceID: 0}
+  - addmat: {instanceID: 0}
+  - alphamat: {instanceID: 0}
+  - zhunxintex: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

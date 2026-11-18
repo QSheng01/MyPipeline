@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1af2dfa06a87f2446984a99490b24ef6, type: 3}
+  m_Name: ResolutionRatioData
+  m_EditorClassIdentifier: 
+  m_ratioDatas:
+  - name: "\u6781\u81F4"
+    ratioSize: {x: 1920, y: 1080}
+    fullScreen: 0
+    matchWidthOrHeight: 0.53
+  - name: "\u9AD8\u6E05"
+    ratioSize: {x: 1280, y: 720}
+    fullScreen: 0
+    matchWidthOrHeight: 1
+  - name: "\u6807\u51C6"
+    ratioSize: {x: 960, y: 540}
+    fullScreen: 0
+    matchWidthOrHeight: 1
+  - name: "\u7701\u7535"
+    ratioSize: {x: 576, y: 324}
+    fullScreen: 0
+    matchWidthOrHeight: 1
+  m_DefaultratioDataIndex: 0

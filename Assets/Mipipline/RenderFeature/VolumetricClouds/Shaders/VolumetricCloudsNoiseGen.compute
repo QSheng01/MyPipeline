@@ -1,0 +1,137 @@
+// Runtime baker for the 3D noise textures used by the volumetric clouds.
+// Generates a seamless (tiling) Perlin-Worley "shape" volume and a Worley "erosion" volume.
+// This replaces the pre-baked HDRP assets (_Worley128RGBA / _ErosionNoise).
+
+#pragma kernel BakeShapeNoise
+#pragma kernel BakeErosionNoise
+
+RWTexture3D<float>  _NoiseOutput;
+float               _NoiseResolution;   // e.g. 64 for shape, 32 for erosion
+
+//--------------------------------------------------------------------------------------------------
+// Hash / noise helpers (periodic so the textures tile seamlessly)
+//--------------------------------------------------------------------------------------------------
+
+float3 Hash33(float3 p, float period)
+{
+    // Wrap the cell to make the noise periodic with 'period'.
+    p = fmod(p, period);
+    p = frac(p * float3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return frac((p.xxy + p.yxx) * p.zyx);
+}
+
+float Hash13(float3 p, float period)
+{
+    p = fmod(p, period);
+    p = frac(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return frac((p.x + p.y) * p.z);
+}
+
+// Periodic value/perlin-ish gradient noise in [0,1]
+float ValueNoise(float3 x, float period)
+{
+    float3 i = floor(x);
+    float3 f = frac(x);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float n000 = Hash13(i + float3(0, 0, 0), period);
+    float n100 = Hash13(i + float3(1, 0, 0), period);
+    float n010 = Hash13(i + float3(0, 1, 0), period);
+    float n110 = Hash13(i + float3(1, 1, 0), period);
+    float n001 = Hash13(i + float3(0, 0, 1), period);
+    float n101 = Hash13(i + float3(1, 0, 1), period);
+    float n011 = Hash13(i + float3(0, 1, 1), period);
+    float n111 = Hash13(i + float3(1, 1, 1), period);
+
+    float nx00 = lerp(n000, n100, f.x);
+    float nx10 = lerp(n010, n110, f.x);
+    float nx01 = lerp(n001, n101, f.x);
+    float nx11 = lerp(n011, n111, f.x);
+    float nxy0 = lerp(nx00, nx10, f.y);
+    float nxy1 = lerp(nx01, nx11, f.y);
+    return lerp(nxy0, nxy1, f.z);
+}
+
+// Periodic Worley (cellular) noise, returns distance to closest feature point in [0,1]
+float WorleyNoise(float3 x, float period)
+{
+    float3 i = floor(x);
+    float3 f = frac(x);
+    float minDist = 1.0;
+
+    [unroll]
+    for (int zz = -1; zz <= 1; zz++)
+    [unroll]
+    for (int yy = -1; yy <= 1; yy++)
+    [unroll]
+    for (int xx = -1; xx <= 1; xx++)
+    {
+        float3 neighbor = float3(xx, yy, zz);
+        float3 point3 = Hash33(i + neighbor, period);
+        float3 diff = neighbor + point3 - f;
+        minDist = min(minDist, dot(diff, diff));
+    }
+    return sqrt(minDist);
+}
+
+float WorleyFBM(float3 p, float period, float freq)
+{
+    float w = 0.0;
+    w += 0.625 * (1.0 - WorleyNoise(p * freq, period * freq));
+    w += 0.250 * (1.0 - WorleyNoise(p * freq * 2.0, period * freq * 2.0));
+    w += 0.125 * (1.0 - WorleyNoise(p * freq * 4.0, period * freq * 4.0));
+    return saturate(w);
+}
+
+float PerlinFBM(float3 p, float period, float freq)
+{
+    float v = 0.0;
+    v += 0.5000 * ValueNoise(p * freq, period * freq);
+    v += 0.2500 * ValueNoise(p * freq * 2.0, period * freq * 2.0);
+    v += 0.1250 * ValueNoise(p * freq * 4.0, period * freq * 4.0);
+    v += 0.0625 * ValueNoise(p * freq * 8.0, period * freq * 8.0);
+    return saturate(v);
+}
+
+float Remap(float x, float a, float b, float c, float d)
+{
+    return (((x - a) / (b - a)) * (d - c)) + c;
+}
+
+//--------------------------------------------------------------------------------------------------
+// Kernels
+//--------------------------------------------------------------------------------------------------
+
+[numthreads(4, 4, 4)]
+void BakeShapeNoise(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_NoiseResolution))
+        return;
+
+    // Normalized cell coordinates. Period is expressed in cells (=3 tiles across the volume).
+    float period = 3.0;
+    float3 uvw = (id + 0.5) / _NoiseResolution * period;
+
+    float perlin = PerlinFBM(uvw, period, 1.0);
+    float worley = WorleyFBM(uvw, period, 1.0);
+
+    // Perlin-Worley: dilate the perlin noise by the worley noise (Nubis technique).
+    float pw = Remap(perlin, worley - 1.0, 1.0, 0.0, 1.0);
+    _NoiseOutput[id] = saturate(pw);
+}
+
+[numthreads(4, 4, 4)]
+void BakeErosionNoise(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_NoiseResolution))
+        return;
+
+    float period = 4.0;
+    float3 uvw = (id + 0.5) / _NoiseResolution * period;
+
+    // Billowy worley for high-frequency erosion detail.
+    float w = WorleyFBM(uvw, period, 1.0);
+    _NoiseOutput[id] = saturate(w);
+}

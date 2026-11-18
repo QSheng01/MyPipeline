@@ -1,0 +1,132 @@
+#pragma kernel CSMain
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+struct Surfel
+{
+    float3 position;
+    float3 normal;
+    float3 albedo;
+    float skyMask;
+    float skyAO;
+};
+
+RWStructuredBuffer<Surfel> _surfels;
+TextureCube _worldPosCubemap;
+TextureCube _normalCubemap;
+TextureCube _albedoCubemap;
+SamplerState sampler_point_clamp;
+float _randSeed;
+float4 _probePos;
+
+// ref: https://stackoverflow.com/questions/4200224/random-noise-functions-for-glsl
+float rand(float2 uv)
+{
+    return frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+// ref: Unreal Engine 4, MonteCarlo.ush
+float3 UniformSphereSample(float u, float v)
+{
+    const float C_PI = 3.14159265359f;
+    float phi = degrees(2.0 * C_PI * u);
+    float cosine_theta = 1.0 - 2.0 * v;
+    float sine_theta = sqrt(1.0 - cosine_theta * cosine_theta);
+    
+    float x = sine_theta * cos(phi);
+    float y = abs(sine_theta * sin(phi));
+    float z = cosine_theta;
+    
+    return float3(x, y, z);
+}
+
+float3 UniformSphereSample2(float u, float v)
+{
+    const float C_PI = 3.14159265359f;
+    float phi = degrees(2.0 * C_PI * u);
+    float cosine_theta = 1.0 - 2.0 * v;
+    float sine_theta = sqrt(1.0 - cosine_theta * cosine_theta);
+    
+    float x = sine_theta * cos(phi);
+    float y = sine_theta * sin(phi);
+    float z = cosine_theta;
+    
+    return float3(x, y, z);
+}
+
+
+#define size 8
+
+float3 DistributingPointSphereSample(int idgroup)
+{
+    float z = (2.0*(float)idgroup -1.0)/((size * size)) -1.0;
+    float x = sqrt(1.0-z*z) * cos(2.0 * PI * idgroup * 0.618);
+    float y = sqrt(1.0-z*z) * sin(2.0 * PI * idgroup * 0.618);
+    return float3(x,y,z);
+}
+
+float3 GenerateHemisphereSample(float3 normal, float rand1, float rand2)
+{
+    // 生成在球面上均匀分布的随机向量
+    float phi = rand1 * 2.0 * PI;
+    float cosTheta = rand2;
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float3 sampleDir = float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+
+    // 将采样方向投影到与法线垂直的半球上
+    float3 tangent = cross(normal, float3(0.0, 0.0, 1.0));
+    if (length(tangent) < 0.001) tangent = cross(normal, float3(0.0, 1.0, 0.0));
+    tangent = normalize(tangent);
+    float3 bitangent = cross(normal, tangent);
+    return sampleDir.x * tangent + sampleDir.y * bitangent + sampleDir.z * normal;
+}
+
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    float2 xy = float2(id.x, id.y) / float2(8, 8);
+    xy += float2(1, 1) * _randSeed;
+
+    float u = rand(xy * 1.0);
+    float v = rand(xy * 2.0);
+    float3 dir = 0;//UniformSphereSample(u, v);
+    float3 skyaodir = 0;//UniformSphereSample(u, v);
+    uint idd = id.x * size + id.y;
+    //完整的球采样
+    dir = DistributingPointSphereSample(idd);
+    //dir = UniformSphereSample2(u,v);
+    //班求
+    skyaodir = UniformSphereSample(u,v);
+    
+    Surfel result;
+
+    // opaque geometry
+    half3 temppos = _worldPosCubemap.SampleLevel(sampler_point_clamp, dir, 0).rgb;
+    result.position = temppos;
+    result.albedo = _albedoCubemap.SampleLevel(sampler_point_clamp, dir, 0).rgb;
+    
+    float4 normal_and_mask = _normalCubemap.SampleLevel(sampler_point_clamp, dir, 0);
+    float skyao = _normalCubemap.SampleLevel(sampler_point_clamp, skyaodir, 0).w;
+    result.normal = normal_and_mask.xyz;
+    result.skyMask = saturate(1.0 - normal_and_mask.w);
+
+    
+    //sky = 1 遮挡物件很远 = 1 遮挡物件比较进  = 0
+    // if(distance(temppos,_probePos)>5.0)
+    // {
+    //     skyao = 0;
+    // }
+    result.skyAO = saturate(1.0 - skyao);
+    
+    // sample sky
+    //result.position += (_probePos.xyz + dir) * result.skyMask;
+    result.position += (_probePos.xyz + dir) * result.skyMask;
+
+
+    uint surfelIndex = id.x * size + id.y;
+    //result.position = surfelIndex;
+    _surfels[surfelIndex] = result;
+}

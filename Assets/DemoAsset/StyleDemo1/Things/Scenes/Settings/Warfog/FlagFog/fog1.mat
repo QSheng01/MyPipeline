@@ -1,0 +1,164 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: fog1
+  m_Shader: {fileID: 4800000, guid: e6fee400de894d446bb7843f0272bf6d, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseAOANoiseMask:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BaseAlbedoASmoothness:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BaseMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BaseNormalMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BlendAlbedo01Map:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BlendMask01Map:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BlendNormal01Map:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DissolveTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 2800000, guid: 295048ac004731640a9159463ba034fd, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NoiseTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Normal:
+        m_Texture: {fileID: 2800000, guid: 622326949ec8ccf45bf311018092aef8, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _OpacityMap:
+        m_Texture: {fileID: 2800000, guid: 5b90b474c5a148d4c956bd8bb793046b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _TextureSample0:
+        m_Texture: {fileID: 2800000, guid: 622326949ec8ccf45bf311018092aef8, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _texcoord:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_Lightmaps:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_LightmapsInd:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_ShadowMasks:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaClip: 0
+    - _AlphaCutoff: 0.5
+    - _BaseAOIntensity: 0.5
+    - _BaseColorIntensity: 1
+    - _BaseMetallic: 0
+    - _BaseMixSetting: 1
+    - _BaseNormalSetting: 1
+    - _BaseSetting: 1
+    - _BaseSmoothness: 0.5
+    - _BlendAmoutR: 1
+    - _BlendChannel: 0
+    - _BlendFresnel: 0
+    - _BlendNormal01Scale: 1
+    - _BlendSetting: 1
+    - _BlendTilingR: 1
+    - _BlendToggle: 0
+    - _BumpScale: 1
+    - _Contrast: 0
+    - _Contrast0: -0.3
+    - _Cull: 2
+    - _Cutoff: 0.5
+    - _Dissolve: 1
+    - _DissolveTime: 0
+    - _Distance: 2
+    - _Distance1: 0
+    - _Distance2: 10
+    - _DstBlend: 0
+    - _EmiisonIntensity: 2.5
+    - _EmissionAndAlbedoBlender: 0
+    - _EnvSetting: 1
+    - _EnvironmentReflections: 1
+    - _EnvironmentReflectionsStrength: 1
+    - _FadeDistance: 50
+    - _FalloffR: 1
+    - _Float2: 1.49
+    - _Float5: 0
+    - _FogClose: 0
+    - _FresnelExp: 2
+    - _Mode: 0
+    - _NoiseIntensity: 0
+    - _NormalScale: 1.65
+    - _OpenRGBCombineTop: 0
+    - _QueueControl: 1
+    - _QueueOffset: 0
+    - _RGBCombineSetting: 1
+    - _ReceiveShadows: 1
+    - _SIMPLE_WIND: 0
+    - _SpecularHighlights: 1
+    - _SrcBlend: 1
+    - _Surface: 0
+    - _SurfaceDistance: 60
+    - _TERRAINBLEND_ON: 0
+    - _TerrainBlendHeight: 0.3
+    - _TerrainBlendSetting: 1
+    - _TransparentShadow: 0
+    - _WindSetting: 0
+    - _YFadeEnd: 156.7
+    - _YFadeStart: 146.9
+    - _ZTest: 4
+    - _ZWrite: 1
+    m_Colors:
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 0}
+    - _DissovleSpeed: {r: 0, g: 0, b: 0, a: 0}
+    - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    - _HBAOColor: {r: 0, g: 0, b: 0, a: 1}
+    - _NoiseSpeed: {r: 0, g: 0, b: 0, a: 0}
+    - _ShadowMapColor: {r: 0, g: 0, b: 0, a: 1}
+    - _Vector0: {r: 0, g: 0, b: 0, a: 0}
+  m_BuildTextureStacks: []

@@ -1,0 +1,154 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &5695409776346731021
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5548654802772713645}
+  - component: {fileID: 4203036243430915340}
+  m_Layer: 0
+  m_Name: VolumeGIControl
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5548654802772713645
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5695409776346731021}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4203036243430915340
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5695409776346731021}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cf2e21a04229b5f41bec25567f684212, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  time:
+    x: 20
+    y: 55
+  TimeOfDay: 75371.94
+  contrlInterp: 0.8723604
+  GIModeEnum: 1
+  todm: {fileID: 0}
+  CubeMapLerp:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0.07083333
+      value: -0.009433962
+      inSlope: 0.9788606
+      outSlope: 0.9788606
+      tangentMode: 136
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 23.400618
+      value: 22.905943
+      inSlope: 1.402084
+      outSlope: 1.402084
+      tangentMode: 136
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 24
+      value: 24
+      inSlope: 1.8253074
+      outSlope: 1.8253074
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  Weight: 0.22337675
+  tempPosMin: {x: 174, y: 196, z: 475.96, w: 1}
+  tempPosMax: {x: 292, y: 244, z: 573.96, w: 1}
+  _GIClampMin: 0
+  _GIClampMax: 1
+  _GIClampIntensity: 1
+  _GIMixRange: 0.6
+  GISampleOffSet: 0.8
+  _AOClampMin: -0.2
+  _AOClampMax: 1
+  _AOMix: 0.6
+  AOSampleOffSet: 1
+  debugGI: 0
+  debugGI2: 0
+  debugGI3: 0
+  L0TexList:
+  - {fileID: 11700000, guid: 1298eb390a3a72546ab9fc359a67fc09, type: 2}
+  - {fileID: 11700000, guid: 477d9f2966be5ae4e8a1f4d18819b4eb, type: 2}
+  - {fileID: 11700000, guid: 20c181ebcc476944da9fc882c4f5351f, type: 2}
+  - {fileID: 11700000, guid: 62fa513dc8af8754bb55a27a896e6637, type: 2}
+  - {fileID: 11700000, guid: f4693028eac18eb438f317658fae5967, type: 2}
+  - {fileID: 11700000, guid: e8ed0be5ce249634fb0ebbbb6f337144, type: 2}
+  - {fileID: 11700000, guid: 2817e38872284ea47b2c785b12e16adc, type: 2}
+  - {fileID: 11700000, guid: 22a8d91381c930744a152caceb06c592, type: 2}
+  - {fileID: 11700000, guid: d524e8b5b00a5f744a39e0444c9d4334, type: 2}
+  - {fileID: 11700000, guid: b6557cb9a63197d49bd0c30143a74474, type: 2}
+  - {fileID: 11700000, guid: f79cc68c44398f34f9ec09ad2b706688, type: 2}
+  - {fileID: 11700000, guid: f812519c318062247806e9e54ff3d863, type: 2}
+  L10TexList:
+  - {fileID: 11700000, guid: 6612fbc9c996e994295896a8e55d8faf, type: 2}
+  - {fileID: 11700000, guid: 39be7869d71a9134bbbe4645b63f2254, type: 2}
+  - {fileID: 11700000, guid: 2c9dbd7df45a9bc4a9585580dd01b930, type: 2}
+  - {fileID: 11700000, guid: fe3c0880cc82b47498186841feda04a7, type: 2}
+  - {fileID: 11700000, guid: 075a590431b553e4fa9d51bd3f5660b4, type: 2}
+  - {fileID: 11700000, guid: fdfa404534bd90e44be6738bf033b134, type: 2}
+  - {fileID: 11700000, guid: 473c44d3fceb3e94dba3b087d23640ac, type: 2}
+  - {fileID: 11700000, guid: fba98e32d9fb09b43bbbe79465badb27, type: 2}
+  - {fileID: 11700000, guid: 549d5c2a54ae3934098fead851dc384a, type: 2}
+  - {fileID: 11700000, guid: fd7c681ea37d724449a2dc18f1406750, type: 2}
+  - {fileID: 11700000, guid: 2de74cee798c77242b83e3cb6fa14972, type: 2}
+  - {fileID: 11700000, guid: a52a68bdf83362746b4f419b7b5fc2e6, type: 2}
+  L11TexList:
+  - {fileID: 11700000, guid: 1cd213fea03074244987ce1d3a2df394, type: 2}
+  - {fileID: 11700000, guid: ded72d88b360db446a8ee556ba298f44, type: 2}
+  - {fileID: 11700000, guid: 52aab1afc69a5f74a84448f68703ab9a, type: 2}
+  - {fileID: 11700000, guid: 62d166b27ef76874d8d0f7e144ce5e6d, type: 2}
+  - {fileID: 11700000, guid: 1b6ad5561b41bf64daf63943987a571d, type: 2}
+  - {fileID: 11700000, guid: 9df425a28da799b45928aaeb3e1f176a, type: 2}
+  - {fileID: 11700000, guid: 9c48c3e7a1b70c44b87873e0465cae5a, type: 2}
+  - {fileID: 11700000, guid: 504b34646958e264785b14f0f83dffc8, type: 2}
+  - {fileID: 11700000, guid: 779f26f0529bbbb48b6cc3c9096f91c4, type: 2}
+  - {fileID: 11700000, guid: 82e51a0a955f9fc498c5f03e76886259, type: 2}
+  - {fileID: 11700000, guid: bcf759aa05497ea45b127289b7b8d3eb, type: 2}
+  - {fileID: 11700000, guid: 2111943ab49cbb448953e633a5a261dc, type: 2}
+  L12TexList:
+  - {fileID: 11700000, guid: b24f73385d4c54d449d7e3043af04cf3, type: 2}
+  - {fileID: 11700000, guid: 6488b9583b023314e83d8daf11026c7d, type: 2}
+  - {fileID: 11700000, guid: 52b1bdfdd8bb225499f025fd3952b6f7, type: 2}
+  - {fileID: 11700000, guid: e6c1c1515c6d30d4b8f8d09c30ec253b, type: 2}
+  - {fileID: 11700000, guid: 280cde61ee3a0a1428075d8ef67fbfd0, type: 2}
+  - {fileID: 11700000, guid: 7ee5d3659edfa8f4496b9d667a657ca7, type: 2}
+  - {fileID: 11700000, guid: 9c6d64adc54ce114c80eb3eb74805be5, type: 2}
+  - {fileID: 11700000, guid: 0283f23dd67b60e48b8ff1faae695c72, type: 2}
+  - {fileID: 11700000, guid: 98f43cc44430dba49870fce57dbe35bd, type: 2}
+  - {fileID: 11700000, guid: a329305c6bb397146862d4ea09c4d1b9, type: 2}
+  - {fileID: 11700000, guid: 2134be12fdb864f4ca8dd1573ab59922, type: 2}
+  - {fileID: 11700000, guid: fda3fe10e4db8bb4093d4a586c11fcb2, type: 2}
+  debugGI4: 0

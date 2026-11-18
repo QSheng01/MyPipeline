@@ -1,0 +1,115 @@
+﻿#ifndef ILLUSION_FORWARD_LIGHT_LOOP_INCLUDED
+#define ILLUSION_FORWARD_LIGHT_LOOP_INCLUDED
+
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/EvaluateScreenSpaceGlobalIllumination.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/PrecomputeRadianceTransfer/EvaluateProbeVolume.hlsl"
+
+#if _PRT_GLOBAL_ILLUMINATION_ON
+    #define SAMPLE_PROBE_VOLUME(worldPos, normal, bakedGI) SampleProbeVolume(worldPos, normal, bakedGI)
+#else
+    #define SAMPLE_PROBE_VOLUME(worldPos, normal, bakedGI) bakedGI
+#endif
+
+#if USE_CLUSTER_LIGHT_LOOP
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/ReflectionProbeNormalization.hlsl"
+
+half CalculateNormalizationFactorFromReflectionProbes(float3 lightingInReflDir, half3 sampleDir, float3 positionWS, float2 normalizedScreenSpaceUV)
+{
+    float totalWeight = 0.0f;
+    float totalFactor = 0.0f;
+    uint probeIndex;
+    ClusterIterator it = ClusterInit(normalizedScreenSpaceUV, positionWS, 1);
+    [loop] while (ClusterNext(it, probeIndex) && totalWeight < 0.99f)
+    {
+        probeIndex -= URP_FP_PROBES_BEGIN;
+
+        float weight = CalculateProbeWeight(positionWS, urp_ReflProbes_BoxMin[probeIndex], urp_ReflProbes_BoxMax[probeIndex]);
+        weight = min(weight, 1.0f - totalWeight);
+        // Calculate Normalization Factor
+        ReflectionProbeData probeData = _reflectionProbeNormalizationData[probeIndex];
+        float factor = 1.0f;
+        if (probeData.normalizeWithProbeVolume > 0)
+        {
+            factor = IllusionGetReflectionProbeNormalizationFactor(lightingInReflDir, sampleDir, probeData.L0L1, probeData.L2_1, probeData.L2_2);
+        }
+        totalFactor += factor * weight;
+        totalWeight += weight;
+    }
+    return totalFactor;
+}
+#endif
+
+half SampleProbeVolumeReflectionNormalize(float3 worldPos, float3 normal, float2 normalizedScreenSpaceUV,
+    float3 bakedGI, float3 reflectionDir)
+{
+#if USE_CLUSTER_LIGHT_LOOP && _PRT_GLOBAL_ILLUMINATION_ON
+    UNITY_BRANCH
+    if (_coefficientVoxelGridSize == 0 || _reflectionProbeNormalizationFactor.w <= 0)
+    {
+        return 1.0f;
+    }
+    
+    float3 lightingInReflDir = 0;
+    if (!TrySampleProbeVolume(worldPos, reflectionDir, lightingInReflDir))
+        return 1.0f;
+    return CalculateNormalizationFactorFromReflectionProbes(lightingInReflDir, normal, worldPos, normalizedScreenSpaceUV);
+#else
+    return 1.0f;
+#endif
+}
+
+bool TrySampleScreenSpaceIndirectDiffuse(float2 normalizedScreenSpaceUV, out half3 indirectDiffuse)
+{
+    indirectDiffuse = 0;
+    
+#if (SURFACE_TYPE_RECEIVE_SSGI && _SCREEN_SPACE_GLOBAL_ILLUMINATION && !defined(LIGHTMAP_ON) && !defined(DYNAMICLIGHTMAP_ON))
+    if (_IndirectDiffuseMode != INDIRECTDIFFUSEMODE_OFF)
+    {
+        indirectDiffuse = SampleScreenSpaceGlobalIllumination(normalizedScreenSpaceUV).rgb;
+        return true;
+    }
+#endif
+
+    return false;
+}
+
+half3 EvaluateIndirectDiffuse(float3 positionWS, float3 normalWS, float2 normalizedScreenSpaceUV, float3 bakedGI)
+{
+    half3 indirectDiffuse;
+    return TrySampleScreenSpaceIndirectDiffuse(normalizedScreenSpaceUV, indirectDiffuse)
+        ? indirectDiffuse : SAMPLE_PROBE_VOLUME(positionWS, normalWS, bakedGI);
+}
+
+void EvaluateIndirectDiffuseAndReflectionNormalization(float3 positionWS, float3 diffuseNormalWS,
+    float3 normalWS, float3 reflectionDir, float2 normalizedScreenSpaceUV, float3 bakedGI,
+    out half3 indirectDiffuse, out half normalizationFactor)
+{
+    bool screenSpaceDiffuse = TrySampleScreenSpaceIndirectDiffuse(normalizedScreenSpaceUV, indirectDiffuse);
+    if (!screenSpaceDiffuse) indirectDiffuse = bakedGI;
+    normalizationFactor = 1;
+#if _PRT_GLOBAL_ILLUMINATION_ON
+    #if USE_CLUSTER_LIGHT_LOOP
+    UNITY_BRANCH
+    if (_coefficientVoxelGridSize != 0 && _reflectionProbeNormalizationFactor.w > 0)
+    {
+        float3 lightingInReflDir, probeDiffuse;
+        bool valid;
+        if (screenSpaceDiffuse)
+            valid = TrySampleProbeVolume(positionWS, reflectionDir, lightingInReflDir);
+        else
+            valid = TrySampleProbeVolumePair(positionWS, diffuseNormalWS, reflectionDir,
+                probeDiffuse, lightingInReflDir);
+        if (valid)
+        {
+            if (!screenSpaceDiffuse) indirectDiffuse = probeDiffuse;
+            normalizationFactor = CalculateNormalizationFactorFromReflectionProbes(
+                lightingInReflDir, normalWS, positionWS, normalizedScreenSpaceUV);
+        }
+        return;
+    }
+    #endif
+    if (!screenSpaceDiffuse)
+        indirectDiffuse = SampleProbeVolume(positionWS, diffuseNormalWS, bakedGI);
+#endif
+}
+#endif

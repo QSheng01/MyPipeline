@@ -1,0 +1,228 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: fx_birdie_scene_01_01
+  m_Shader: {fileID: 4800000, guid: 893d7c0fb8d72734890dce989ebc0342, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords:
+  - _ALPHARAD1_ALPHA
+  - _CHANNEL_OFF
+  m_LightmapFlags: 5
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _CubeMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DissolveDirTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DissolveTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FlowMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 2800000, guid: 68d26640adad3c840831d9b5df8b138b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTexture:
+        m_Texture: {fileID: 2800000, guid: 68d26640adad3c840831d9b5df8b138b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MaskTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NoiseTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SubTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _VOtext:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _texcoord:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - MainTexture: 2
+    - _AlphaCutoff: 0.5
+    - _AlphaExp: 1
+    - _AlphaRad1: 1
+    - _AlphaRemap: 0
+    - _BlendIntensity: 0.1
+    - _BlendModeDst: 1
+    - _BlendModeSrc: 5
+    - _BlendTemp: 1
+    - _Channel: 0
+    - _CloseColor: 0
+    - _ColorMask: 15
+    - _ContrastValue0: 0
+    - _ContrastValue1: 0
+    - _ContrastValue10: 0
+    - _ContrastValue11: 0
+    - _ContrastValue12: 0
+    - _ContrastValue13: 0
+    - _ContrastValue14: 0
+    - _ContrastValue15: 0
+    - _ContrastValue16: 0
+    - _ContrastValue17: 0
+    - _ContrastValue18: 0
+    - _ContrastValue19: 0
+    - _ContrastValue2: 0
+    - _ContrastValue20: 0
+    - _ContrastValue3: 0
+    - _ContrastValue4: 0
+    - _ContrastValue5: 0
+    - _ContrastValue6: 0
+    - _ContrastValue7: 0
+    - _ContrastValue8: 0
+    - _ContrastValue9: 0
+    - _Cull: 0
+    - _CullMode: 0
+    - _DissRotation: 0
+    - _DissolveCustomOffsetX: 0
+    - _DissolveCustomOffsetY: 0
+    - _DissolveDirAlpha: 1
+    - _DissolveDirIntensity: 0.9
+    - _DissolveNoise: 0
+    - _DissolveTexAlpha: 1
+    - _DissolveTex_PannerSpeedU: 0
+    - _DissolveTex_PannerSpeedV: 0
+    - _DissolveUV2: 0
+    - _Dissolve_Amount: 0
+    - _Distance: 0
+    - _FlowLerp: 0
+    - _FresnelPower: 5
+    - _FresnelSmooth: 0
+    - _GlobalAlpha: 1
+    - _HUEoffset: 0
+    - _HeightFog: 0
+    - _InvFade: 1
+    - _IsDistanceAdd: 0
+    - _IsNormalizeNoise: 0
+    - _IsOffsetNoise: 0
+    - _MainAlphaChannel: 0
+    - _MainChannel: 0
+    - _MainClamp: 0
+    - _MainCustomOffsetX: 0
+    - _MainCustomOffsetY: 0
+    - _MainRota: 0
+    - _MainTex_PannerSpeedU: 0
+    - _MainTex_PannerSpeedV: 0
+    - _MainUVChannel: 0
+    - _MaskCustomOffsetX: 0
+    - _MaskCustomOffsetY: 0
+    - _MaskRota: 0
+    - _MaskRotaSpeed: 0
+    - _MaskRotation: 0
+    - _MaskTexAlpha: 1
+    - _MaskTexFresnel: 4
+    - _MaskTexNoise: 4
+    - _MaskTexSub: 4
+    - _MaskTex_PannerSpeedU: 0
+    - _MaskTex_PannerSpeedV: 0
+    - _MaskUV2: 0
+    - _NoiseCustomOffsetX: 0
+    - _NoiseCustomOffsetY: 0
+    - _NoiseIntensity: 0.01
+    - _NoiseTexChannel: 1
+    - _NoiseUV2: 0
+    - _OffsetInt: 1
+    - _OneMinusFresnel: 0
+    - _OutlineIntensity: 0.1
+    - _RampCustomOffsetX: 0
+    - _RampCustomOffsetY: 0
+    - _RampPower: 1
+    - _RampUVChannel: 0
+    - _Ramp_PannerSpeedU: 0
+    - _Ramp_PannerSpeedV: 0
+    - _Randomoffset: 0
+    - _RotaSpeed: 0
+    - _Rotation: 0
+    - _Saturation: 0
+    - _Stencil: 0
+    - _StencilComp: 8
+    - _StencilOp: 0
+    - _StencilReadMask: 255
+    - _StencilWriteMask: 255
+    - _SubBlend: 0
+    - _SubChannel: 0
+    - _SubCustomOffsetX: 0
+    - _SubCustomOffsetY: 0
+    - _SubLerp: 0
+    - _SubMulAlpha: 0
+    - _SubNoiseIntensity: 0
+    - _SubRota: 0
+    - _SubRotaSpeed: 0
+    - _SubRotation: 0
+    - _SubTex_PannerSpeedU: 0
+    - _SubTex_PannerSpeedV: 0
+    - _SubUVChannel: 0
+    - _UsTwist: 0
+    - _VOChannel: 1
+    - _VO_PannerSpeedU: 0.1
+    - _VO_PannerSpeedV: 0.1
+    - _VO_tillingU: 1
+    - _VO_tillingV: 1
+    - _VOlerp: 0
+    - _Voroi2Speed: 0.1
+    - _VoroiSpeed: 0.1
+    - _VoroiTillingX: 1
+    - _VoroiTillingY: 1
+    - _Wave: 0.16
+    - _ZOffset: 0
+    - _ZTest: 2
+    - _ZWrite: 0
+    - _enableFog: 0
+    - _voUV2: 0
+    m_Colors:
+    - _BackColor: {r: 1, g: 1, b: 1, a: 1}
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _CubeColor: {r: 0.5, g: 0.5, b: 0.5, a: 0}
+    - _Dissolve_color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _DistancColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    - _FresnelColor: {r: 0, g: 0, b: 0, a: 0}
+    - _GlobalColor: {r: 1, g: 1, b: 1, a: 1}
+    - _MainColor: {r: 1, g: 1, b: 1, a: 1}
+    - _MainTexSpeed: {r: 0.8, g: 0, b: 0, a: 0}
+    - _NoiseSpeedPower: {r: 0, g: 0, b: 1, a: 1}
+    - _Refine: {r: 1, g: 1, b: 1, a: 0}
+    - _SubColor: {r: 1, g: 1, b: 1, a: 1}
+    - _TintColor: {r: 0.49264705, g: 0.49264705, b: 0.49264705, a: 0.307}
+    - _UvMove: {r: 0, g: 0, b: 0, a: 0}
+    - _UvTwist: {r: 0, g: 0, b: 0, a: 0}
+    - _WaveSpeed: {r: 0.1, g: 0, b: 0, a: 0}
+    - _XYZPower: {r: 1, g: 1, b: 1, a: 0}
+  m_BuildTextureStacks: []

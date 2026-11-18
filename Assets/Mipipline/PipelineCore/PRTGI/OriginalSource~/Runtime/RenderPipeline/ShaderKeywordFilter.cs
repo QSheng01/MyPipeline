@@ -1,0 +1,136 @@
+﻿#if UNITY_EDITOR
+#pragma warning disable IDE0051
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+using UnityEditor.ShaderKeywordFilter;
+using UnityEngine;
+
+namespace Illusion.Rendering
+{
+    public partial class IllusionRendererFeature
+    {
+        // Notice that prefilter attribute only works for serialized fields and constants
+        internal enum PrefilterMode
+        {
+            Remove,                     // Removes the keyword
+            Select,                     // Keeps the keyword
+            SelectOnly                  // Selects the keyword and removes others
+        }
+
+        // ReSharper disable once UnusedMember.Local
+#if !UNITY_2023_1_OR_NEWER
+        [ApplyRulesIfNotGraphicsAPI(GraphicsDeviceType.OpenGLES2)]
+#endif
+        [SelectIf(true, overridePriority: true, keywordNames: ShaderKeywordStrings.MainLightShadowScreen)]
+        private const bool RequiresScreenSpaceShadowsKeyword = true;
+        
+        [RemoveIf(PrefilterMode.Remove, overridePriority: true, keywordNames: ShaderKeywordStrings.ScreenSpaceOcclusion)]
+        [SelectIf(PrefilterMode.Select, overridePriority: true, keywordNames: new [] {"", ShaderKeywordStrings.ScreenSpaceOcclusion})]
+        [SelectIf(PrefilterMode.SelectOnly, overridePriority: true, keywordNames: ShaderKeywordStrings.ScreenSpaceOcclusion)]
+        [SerializeField]
+        internal PrefilterMode screenSpaceOcclusionPrefilterMode = PrefilterMode.Select;
+
+        // ReSharper disable once UnusedMember.Local
+        // Override priority in UniversalRenderPipelinePrefitering
+        // Prefer Depth Normal, see GroundTruthAmbientOcclusion.cs
+        [SelectIf(true, overridePriority: true, keywordNames: ScreenSpaceAmbientOcclusion.k_SourceDepthNormalsKeyword)]
+        private const bool RequiresScreenSpaceOcclusionDepthNormals = true;
+        
+        // ReSharper disable once UnusedMember.Local
+        [SelectIf(true, keywordNames: new [] {"", IllusionShaderKeywords._ILLUSION_RENDER_PASS_ENABLED})]
+        private const bool RequiresNativeRenderPass = true;
+        
+        // ReSharper disable once UnusedMember.Local
+        [RemoveIf(true, keywordNames: IllusionShaderKeywords._DEBUG_SCREEN_SPACE_SHADOW_MAINLIGHT)]
+        private const bool StripScreenSpaceShadowMainLightDebug = true;
+
+        // ReSharper disable once UnusedMember.Local
+        [RemoveIf(true, keywordNames: IllusionShaderKeywords._DEBUG_SCREEN_SPACE_SHADOW_CONTACT)]
+        private const bool StripScreenSpaceShadowContactDebug = true;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._SCREEN_SPACE_SSS)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._SCREEN_SPACE_SSS})]
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._SCREEN_SPACE_SSS)]
+        [SerializeField]
+        internal PrefilterMode screenSpaceSubsurfaceScatteringPrefilterMode = PrefilterMode.Select;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._CONTACT_SHADOWS)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._CONTACT_SHADOWS})]
+        // [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._CONTACT_SHADOWS)] // Keep off variant
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: new [] {"", IllusionShaderKeywords._CONTACT_SHADOWS})]
+        [SerializeField]
+        internal PrefilterMode contactShadowPrefilterMode = PrefilterMode.Select;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._PCSS_SHADOWS)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._PCSS_SHADOWS})]
+        // [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._PCSS_SHADOWS)] // Keep off variant
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: new [] {"", IllusionShaderKeywords._PCSS_SHADOWS})]
+        [SerializeField]
+        internal PrefilterMode percentageCloserSoftShadowsPrefilterMode = PrefilterMode.Select;
+        
+        // The area shadow axis (off / AREA_SHADOW_MEDIUM / AREA_SHADOW_HIGH) is a single multi_compile set, so one field
+        // selects the exact subset the target renderers need. Off is only kept for renderers without area lights:
+        // an enabled feature keeps its tier keyword resident and disables area lights with a zero light count.
+        internal enum AreaShadowPrefilterMode
+        {
+            OffOnly,
+            MediumOnly,
+            HighOnly,
+            OffAndMedium,
+            OffAndHigh,
+            MediumAndHigh,
+            All
+        }
+
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(AreaShadowPrefilterMode.OffOnly,       keywordNames: new [] {IllusionShaderKeywords.AREA_SHADOW_MEDIUM, IllusionShaderKeywords.AREA_SHADOW_HIGH})]
+        [SelectIf(AreaShadowPrefilterMode.MediumOnly,    keywordNames: IllusionShaderKeywords.AREA_SHADOW_MEDIUM)]
+        [SelectIf(AreaShadowPrefilterMode.HighOnly,      keywordNames: IllusionShaderKeywords.AREA_SHADOW_HIGH)]
+        [SelectIf(AreaShadowPrefilterMode.OffAndMedium,  keywordNames: new [] {"", IllusionShaderKeywords.AREA_SHADOW_MEDIUM})]
+        [SelectIf(AreaShadowPrefilterMode.OffAndHigh,    keywordNames: new [] {"", IllusionShaderKeywords.AREA_SHADOW_HIGH})]
+        [SelectIf(AreaShadowPrefilterMode.MediumAndHigh, keywordNames: new [] {IllusionShaderKeywords.AREA_SHADOW_MEDIUM, IllusionShaderKeywords.AREA_SHADOW_HIGH})]
+        [SelectIf(AreaShadowPrefilterMode.All,           keywordNames: new [] {"", IllusionShaderKeywords.AREA_SHADOW_MEDIUM, IllusionShaderKeywords.AREA_SHADOW_HIGH})]
+        [SerializeField]
+        internal AreaShadowPrefilterMode areaShadowPrefilterMode = AreaShadowPrefilterMode.All;
+
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._PRT_GLOBAL_ILLUMINATION)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._PRT_GLOBAL_ILLUMINATION})]
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._PRT_GLOBAL_ILLUMINATION)]
+        [SerializeField]
+        internal PrefilterMode precomputedRadianceTransferGIPrefilterMode = PrefilterMode.Select;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._TRANSPARENT_PER_OBJECT_SHADOWS)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._TRANSPARENT_PER_OBJECT_SHADOWS})]
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._TRANSPARENT_PER_OBJECT_SHADOWS)]
+        [SerializeField]
+        internal PrefilterMode transparentPerObjectShadowsPrefilterMode = PrefilterMode.Select;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._SCREEN_SPACE_REFLECTION)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._SCREEN_SPACE_REFLECTION})]
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._SCREEN_SPACE_REFLECTION)]
+        [SerializeField]
+        internal PrefilterMode screenSpaceReflectionPrefilterMode = PrefilterMode.Select;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._SCREEN_SPACE_GLOBAL_ILLUMINATION)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._SCREEN_SPACE_GLOBAL_ILLUMINATION})]
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._SCREEN_SPACE_GLOBAL_ILLUMINATION)]
+        [SerializeField]
+        internal PrefilterMode screenSpaceGlobalIlluminationPrefilterMode = PrefilterMode.Select;
+        
+        // ReSharper disable once NotAccessedField.Global
+        [RemoveIf(PrefilterMode.Remove,     keywordNames: IllusionShaderKeywords._SHADOW_BIAS_FRAGMENT)]
+        [SelectIf(PrefilterMode.Select,     keywordNames: new [] {"", IllusionShaderKeywords._SHADOW_BIAS_FRAGMENT})]
+        [SelectIf(PrefilterMode.SelectOnly, keywordNames: IllusionShaderKeywords._SHADOW_BIAS_FRAGMENT)]
+        [SerializeField]
+        internal PrefilterMode fragmentShadowBiasPrefilterMode = PrefilterMode.Select;
+    }
+}
+#pragma warning restore IDE0051
+#endif

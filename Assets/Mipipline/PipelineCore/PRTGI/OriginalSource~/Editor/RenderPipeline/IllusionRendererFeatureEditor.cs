@@ -1,0 +1,336 @@
+﻿using UnityEngine;
+using UnityEditor;
+using UnityEditor.Rendering.Universal;
+
+namespace Illusion.Rendering.Editor
+{
+    [CustomEditor(typeof(IllusionRendererFeature))]
+    internal class IllusionRendererFeatureEditor : PropertyFetchEditor<IllusionRendererFeature>
+    {
+        // General Settings
+        private SerializedProperty _requireHistoryColor;
+        private SerializedProperty _preferComputeShader;
+        private SerializedProperty _enableStencilVrs;
+        private SerializedProperty _worldScale;
+
+        // Transparency Settings
+        private SerializedProperty _orderIndependentTransparency;
+        private SerializedProperty _oitFilterLayer;
+        private SerializedProperty _oitOverrideStencil;
+        private SerializedProperty _transparentDepthPostPass;
+        private SerializedProperty _screenSpaceRefraction;
+        private SerializedProperty _transparentScreenSpaceReflection;
+        private SerializedProperty _oitTransparentOverdrawPass;
+
+        // Lighting Settings
+        private SerializedProperty _wetSurfaceDecals;
+        private SerializedProperty _subsurfaceScattering;
+        private SerializedProperty _dlssNeuralRendering;
+
+        private SerializedProperty _pathTracing;
+
+        // Shadow Settings
+        private SerializedProperty _perObjectShadowRenderingLayer;
+        private SerializedProperty _additionalDirectionalPerObjectShadows;
+        private SerializedProperty _transparentReceivePerObjectShadows;
+        private SerializedProperty _contactShadows;
+        private SerializedProperty _pcssShadows;
+        private SerializedProperty _fragmentShadowBias;
+        private SerializedProperty _areaLights;
+        private SerializedProperty _areaShadowFilteringQuality;
+
+        private SerializedProperty _areaLightCookieAtlasSize;
+
+        private SerializedProperty _areaLightCookieFormat;
+
+        // Ambient Occlusion Settings
+        private SerializedProperty _groundTruthAO;
+
+        // Global Illumination Settings
+        private SerializedProperty _screenSpaceReflection;
+        private SerializedProperty _screenSpaceGlobalIllumination;
+        private SerializedProperty _rayTracedGlobalIllumination;
+        private SerializedProperty _precomputedRadianceTransferGI;
+        private SerializedProperty _enableIndirectDiffuseRenderingLayers;
+
+        // Post Processing Settings
+        private SerializedProperty _convolutionBloom;
+        private SerializedProperty _volumetricFog;
+
+        private SerializedProperty _sunShafts;
+
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+
+            // General Settings
+            _requireHistoryColor = Properties.Find(feature => feature.requireHistoryColor);
+            _preferComputeShader = Properties.Find(feature => feature.preferComputeShader);
+            _enableStencilVrs = Properties.Find(feature => feature.enableStencilVrs);
+            _worldScale = Properties.Find(feature => feature.worldScale);
+
+            // Transparency Settings
+            _orderIndependentTransparency = Properties.Find(feature => feature.orderIndependentTransparency);
+            _oitFilterLayer = Properties.Find(feature => feature.oitFilterLayer);
+            _oitOverrideStencil = Properties.Find(feature => feature.oitOverrideStencil);
+            _transparentDepthPostPass = Properties.Find(feature => feature.transparentDepthPostPass);
+            _screenSpaceRefraction = Properties.Find(feature => feature.screenSpaceRefraction);
+            _transparentScreenSpaceReflection = Properties.Find(feature => feature.transparentScreenSpaceReflection);
+            _oitTransparentOverdrawPass = Properties.Find(feature => feature.oitTransparentOverdrawPass);
+
+            // Lighting Settings
+            _wetSurfaceDecals = Properties.Find(feature => feature.wetSurfaceDecals);
+            _subsurfaceScattering = Properties.Find(feature => feature.subsurfaceScattering);
+            _dlssNeuralRendering = Properties.Find(feature => feature.dlssNeuralRendering);
+            _pathTracing = Properties.Find(feature => feature.pathTracing);
+
+            // Shadow Settings
+            _perObjectShadowRenderingLayer = Properties.Find(feature => feature.perObjectShadowRenderingLayer);
+            _additionalDirectionalPerObjectShadows = Properties.Find(feature => feature.additionalDirectionalPerObjectShadows);
+            _transparentReceivePerObjectShadows = Properties.Find(feature => feature.transparentReceivePerObjectShadows);
+            _contactShadows = Properties.Find(feature => feature.contactShadows);
+            _pcssShadows = Properties.Find(feature => feature.pcssShadows);
+            _fragmentShadowBias = Properties.Find(feature => feature.fragmentShadowBias);
+            _areaLights = Properties.Find(feature => feature.areaLights);
+            _areaShadowFilteringQuality = Properties.Find(feature => feature.areaShadowFilteringQuality);
+            _areaLightCookieAtlasSize = Properties.Find(feature => feature.areaLightCookieAtlasSize);
+            _areaLightCookieFormat = Properties.Find(feature => feature.areaLightCookieFormat);
+
+            // Ambient Occlusion Settings
+            _groundTruthAO = Properties.Find(feature => feature.groundTruthAO);
+
+            // Global Illumination Settings
+            _screenSpaceReflection = Properties.Find(feature => feature.screenSpaceReflection);
+            _screenSpaceGlobalIllumination = Properties.Find(feature => feature.screenSpaceGlobalIllumination);
+            _rayTracedGlobalIllumination = Properties.Find(feature => feature.rayTracedGlobalIllumination);
+            _precomputedRadianceTransferGI = Properties.Find(feature => feature.precomputedRadianceTransferGI);
+            _enableIndirectDiffuseRenderingLayers = Properties.Find(feature => feature.enableIndirectDiffuseRenderingLayers);
+
+            // Post Processing Settings
+            _convolutionBloom = Properties.Find(feature => feature.convolutionBloom);
+            _volumetricFog = Properties.Find(feature => feature.volumetricFog);
+            _sunShafts = Properties.Find(feature => feature.sunShafts);
+        }
+
+        public override void OnInspectorGUI()
+        {
+            serializedObject.Update();
+
+            EditorGUILayout.Space();
+            
+            // General Settings
+            DrawGeneralSettings();
+
+            // Transparency Settings
+            DrawTransparencySettings();
+
+            // Lighting Settings
+            DrawLightingSettings();
+
+            // Shadow Settings
+            DrawShadowSettings();
+
+            // Ambient Occlusion Settings
+            DrawAmbientOcclusionSettings();
+
+            // Global Illumination Settings
+            DrawGlobalIlluminationSettings();
+
+            // Post Processing Settings
+            DrawPostProcessingSettings();
+
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        private void DrawGeneralSettings()
+        {
+            if (Foldout("General", true))
+            {
+                EditorGUILayout.PropertyField(_requireHistoryColor, Styles.RequireHistoryColorLabel);
+                EditorGUILayout.PropertyField(_preferComputeShader, Styles.PreferComputeShaderLabel);
+                EditorGUILayout.PropertyField(_enableStencilVrs, Styles.EnableStencilVrsLabel);
+                EditorGUILayout.PropertyField(_worldScale, Styles.WorldScaleLabel);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawTransparencySettings()
+        {
+            if (Foldout("Transparency", true))
+            {
+                EditorGUILayout.PropertyField(_transparentDepthPostPass, Styles.TransparentDepthPostPassLabel);
+                EditorGUILayout.PropertyField(_screenSpaceRefraction, Styles.ScreenSpaceRefractionLabel);
+                EditorGUILayout.PropertyField(_transparentScreenSpaceReflection, Styles.TransparentScreenSpaceReflectionLabel);
+                EditorGUILayout.PropertyField(_orderIndependentTransparency, Styles.OrderIndependentTransparencyLabel);
+                if (_orderIndependentTransparency.boolValue)
+                {
+                    EditorGUILayout.PropertyField(_oitFilterLayer, Styles.OitFilterLayerLabel);
+                    EditorGUILayout.PropertyField(_oitOverrideStencil, Styles.OitOverrideStencilLabel);
+                    EditorGUILayout.PropertyField(_oitTransparentOverdrawPass, Styles.OitTransparentOverdrawPassLabel);
+                }
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawLightingSettings()
+        {
+            if (Foldout("Lighting", true))
+            {
+                EditorGUILayout.PropertyField(_wetSurfaceDecals, Styles.WetSurfaceDecalsLabel);
+                EditorGUILayout.PropertyField(_subsurfaceScattering, Styles.SubsurfaceScatteringLabel);
+                EditorGUILayout.PropertyField(_dlssNeuralRendering, Styles.DLSSNeuralRenderingLabel);
+                EditorGUILayout.PropertyField(_pathTracing, Styles.PathTracingLabel);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawShadowSettings()
+        {
+            if (Foldout("Shadows", true))
+            {
+                EditorGUILayout.PropertyField(_perObjectShadowRenderingLayer, Styles.PerObjectShadowRenderingLayerLabel);
+                EditorGUILayout.PropertyField(_additionalDirectionalPerObjectShadows,
+                    Styles.AdditionalDirectionalPerObjectShadowsLabel);
+                EditorGUILayout.PropertyField(_transparentReceivePerObjectShadows, Styles.TransparentReceivePerObjectShadowsLabel);
+                EditorGUILayout.PropertyField(_pcssShadows, Styles.PcssShadowsLabel);
+                EditorGUILayout.PropertyField(_contactShadows, Styles.ContactShadowsLabel);
+                EditorGUILayout.PropertyField(_fragmentShadowBias, Styles.FragmentShadowBiasLabel);
+                EditorGUILayout.PropertyField(_areaLights, Styles.AreaLightsLabel);
+                if (_areaLights.boolValue)
+                {
+                    EditorGUILayout.PropertyField(_areaShadowFilteringQuality, Styles.AreaShadowFilteringQualityLabel);
+                    EditorGUILayout.PropertyField(_areaLightCookieAtlasSize, Styles.AreaLightCookieAtlasSizeLabel);
+                    EditorGUILayout.PropertyField(_areaLightCookieFormat, Styles.AreaLightCookieFormatLabel);
+                }
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawAmbientOcclusionSettings()
+        {
+            if (Foldout("Ambient Occlusion", true))
+            {
+                EditorGUILayout.PropertyField(_groundTruthAO, Styles.GroundTruthAOLabel);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawGlobalIlluminationSettings()
+        {
+            if (Foldout("Global Illumination", true))
+            {
+                EditorGUILayout.PropertyField(_screenSpaceReflection, Styles.ScreenSpaceReflectionLabel);
+                EditorGUILayout.PropertyField(_screenSpaceGlobalIllumination, Styles.ScreenSpaceGlobalIlluminationLabel);
+                EditorGUILayout.PropertyField(_rayTracedGlobalIllumination, Styles.RayTracedGlobalIlluminationLabel);
+                EditorGUILayout.PropertyField(_precomputedRadianceTransferGI, Styles.PrecomputedRadianceTransferGILabel);
+                EditorGUILayout.PropertyField(_enableIndirectDiffuseRenderingLayers, Styles.EnableIndirectDiffuseRenderingLayersLabel);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawPostProcessingSettings()
+        {
+            if (Foldout("Post Processing", true))
+            {
+                EditorGUILayout.PropertyField(_convolutionBloom, Styles.ConvolutionBloomLabel);
+                EditorGUILayout.PropertyField(_volumetricFog, Styles.VolumetricFogLabel);
+                EditorGUILayout.PropertyField(_sunShafts, Styles.SunShaftsLabel);
+            }
+        }
+
+        private static class Styles
+        {
+            // General Settings
+            public static readonly GUIContent RequireHistoryColorLabel = new("Require History Color",
+                "If this is enabled, the camera copies the last rendered view so it can be accessed at next frame in the pipeline." +
+                "When temporal anti-aliasing is on, history color will fetch accumulation buffer directly.");
+            public static readonly GUIContent PreferComputeShaderLabel = new("Prefer Compute Shader",
+                "Whether prefer to calculating effects in compute shader if possible.");
+            public static readonly GUIContent EnableStencilVrsLabel = new("Enable Stencil VRS",
+                "Whether enable using stencil to control the rasterization and pixel shading rate.");
+            public static readonly GUIContent WorldScaleLabel = new("World Scale",
+                "Unity world units per logical world unit. A value of 10 means one logical meter is represented by ten Unity units.");
+
+            // Transparency Settings
+            public static readonly GUIContent OrderIndependentTransparencyLabel = new("Order Independent Transparency",
+                "Enable Weighted Blended Order-Independent Transparency which will solve transparent objects rendering order problem.");
+            public static readonly GUIContent OitFilterLayerLabel = new("OIT Filter Layer",
+                "Configure the rendering objects LayerMask for the oit passes.");
+            public static readonly GUIContent OitOverrideStencilLabel = new("OIT Override Stencil",
+                "Override the stencil state for the transparent overdraw pass.");
+            public static readonly GUIContent TransparentDepthPostPassLabel = new("Transparent Depth Post Pass",
+                "Enable to write transparent depth after depth prepass.");
+            public static readonly GUIContent ScreenSpaceRefractionLabel = new("Screen Space Refraction",
+                "Copy opaque scene color for supported refractive shaders.");
+            public static readonly GUIContent TransparentScreenSpaceReflectionLabel = new("Transparent Screen Space Reflection",
+                "Enable screen space reflections for supported transparent surfaces.");
+            public static readonly GUIContent OitTransparentOverdrawPassLabel = new("OIT Transparent Overdraw Pass",
+                "Enable to overdraw universal transparent objects after rendering OIT objects.");
+
+            // Lighting Settings
+            public static readonly GUIContent WetSurfaceDecalsLabel = new("Wet Surface Decals",
+                "Enable wet and dry surface projection in Forward rendering.");
+            public static readonly GUIContent SubsurfaceScatteringLabel = new("Subsurface Scattering",
+                "Enable Screen Space Subsurface Scattering.");
+            public static readonly GUIContent DLSSNeuralRenderingLabel = new("DLSS Neural Rendering",
+                "Enable the optional full-resolution DLSS Neural Rendering pass.");
+            public static readonly GUIContent PathTracingLabel = new("Path Tracing",
+                "Enable path tracing for cameras with an active Path Tracing Volume on devices that support ray tracing.");
+
+            // Shadow Settings
+            public static readonly GUIContent PerObjectShadowRenderingLayerLabel = new("Per Object Shadow Rendering Layer",
+                "Rendering layer for per object shadow to prevent shadow overdraw in main light caster.");
+            public static readonly GUIContent AdditionalDirectionalPerObjectShadowsLabel = new(
+                "Additional Directional Per-Object Shadows",
+                "Allow a camera to use an additional directional light for per-object shadows.");
+            public static readonly GUIContent TransparentReceivePerObjectShadowsLabel = new("Transparent Receive Per Object Shadows",
+                "When enabled, transparent objects will sample per object shadow.");
+            public static readonly GUIContent ContactShadowsLabel = new("Contact Shadows",
+                "Enable contact shadows feature.");
+            public static readonly GUIContent PcssShadowsLabel = new("PCSS Shadows",
+                "Enable Percentage Closer Soft Shadows.");
+            public static readonly GUIContent FragmentShadowBiasLabel = new("Fragment Shadow Bias",
+                "Enable Fragment Shadow Bias in receiver pass instead of caster pass, notice this will let IllusionRP shaders not compatible to URP original shaders.");
+            public static readonly GUIContent AreaLightCookieAtlasSizeLabel = new("Area Light Cookie Atlas", "Resolution of the power of two atlas holding rectangle area light cookies.");
+
+            public static readonly GUIContent AreaLightCookieFormatLabel = new("Area Light Cookie Format", "Graphics format of the area light cookie atlas.");
+
+            public static readonly GUIContent AreaLightsLabel = new("Area Lights",
+                "Enable rectangle area lights (LTC lighting and area shadows), the Area Lighting volume must also be enabled.");
+            public static readonly GUIContent AreaShadowFilteringQualityLabel = new("Area Shadow Filtering",
+                "Medium uses blurred EVSM moments, High uses area PCSS on the depth atlas.");
+
+            // Ambient Occlusion Settings
+            public static readonly GUIContent GroundTruthAOLabel = new("Ground Truth AO",
+                "Enable ground truth ambient occlusion.");
+
+            // Global Illumination Settings
+            public static readonly GUIContent ScreenSpaceReflectionLabel = new("Screen Space Reflection",
+                "Enable screen space reflection.");
+            public static readonly GUIContent ScreenSpaceGlobalIlluminationLabel = new("Screen Space GI",
+                "Enable screen space global illumination.");
+            public static readonly GUIContent RayTracedGlobalIlluminationLabel = new("Ray Traced GI",
+                "Enable ray traced global illumination for raster cameras on devices that support ray tracing.");
+            public static readonly GUIContent PrecomputedRadianceTransferGILabel = new("Precomputed Radiance Transfer GI",
+                "Enable precomputed radiance transfer global illumination.");
+            public static readonly GUIContent EnableIndirectDiffuseRenderingLayersLabel = new("Enable Indirect Diffuse Rendering Layers",
+                "Enable using main light rendering layers to control indirect diffuse intensity.");
+
+            // Post Processing Settings
+            public static readonly GUIContent ConvolutionBloomLabel = new("Convolution Bloom",
+                "Enable high-quality bloom effect using Fast Fourier Transform convolution.");
+            public static readonly GUIContent VolumetricFogLabel = new("Volumetric Fog",
+                "Enable volumetric fog effect.");
+            public static readonly GUIContent SunShaftsLabel = new("Sun Shafts",
+                "Enable screen space sun shafts effect.");
+        }
+    }
+}
+
+

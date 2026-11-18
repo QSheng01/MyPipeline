@@ -1,0 +1,245 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 12001_famale01_hair
+  m_Shader: {fileID: 4800000, guid: 60e99071dc53afa45bc548faff68462e, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _Normal
+  m_InvalidKeywords:
+  - _NORMALMAP
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: 2000
+  stringTagMap:
+    RenderType: Opaque
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _AnisotropyLineMap:
+        m_Texture: {fileID: 2800000, guid: d3f25300c823e2148b5240d1974d1a5c, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _AnisotropyShapeMap:
+        m_Texture: {fileID: 2800000, guid: 8b4ac06474b477945987930462a34edc, type: 3}
+        m_Scale: {x: 7, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 16567496814c7f04fbb70b4bd52d9088, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 2800000, guid: 38efb7c3ec6deab4aa2803dd5c5f5b5f, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMaskMap:
+        m_Texture: {fileID: 2800000, guid: cc96bba1d28c8a349bbdc9cd02655606, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CustomGIMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EffectMaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EvnCubemap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LightMap:
+        m_Texture: {fileID: 2800000, guid: 497aed4290e1af642a7c8382e34dbe19, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NPRLightMap:
+        m_Texture: {fileID: 2800000, guid: f9f6795ff88447c4fb10e74b50638e9a, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RampMap:
+        m_Texture: {fileID: 2800000, guid: 60234d89d9c66434493492a05168d0cd, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ShadowMap:
+        m_Texture: {fileID: 2800000, guid: 60234d89d9c66434493492a05168d0cd, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AOIntensity: 1
+    - _AOMASKChina: 1
+    - _AlphaClip: 0
+    - _AnisotropyLineIntensity: 0.509
+    - _AnisotropyLinePos: 1
+    - _AnisotropyLineRange: 1
+    - _AnisotropyLineTip: 1
+    - _AnisotropyTip1: 1
+    - _AnisotropyTip2: 1
+    - _AnisotropyTip3: 1
+    - _AoColorBlendAlbedo: 0
+    - _AoStrength: 0
+    - _BaseMapTip: 1
+    - _BaseSetting: 0
+    - _BlackRimBlockBegin: 1
+    - _BlackRimBlockEnd: 1
+    - _BlackRimThreshold: 0.65
+    - _Brightness: 1
+    - _BumpMapTip: 1
+    - _BumpStrength: 1
+    - _CharacterEffectGrade: 0
+    - _Cull: 2
+    - _CustomShadowDepthBias: 1
+    - _CustomShadowNormalBias: 0.01
+    - _Cutoff: 0.5
+    - _DHDIFFUSERAMP: 1
+    - _DiffuseAddShadow: 1
+    - _DiffuseSetting: 0
+    - _DstBlend: 0
+    - _ENVSPECULARMASKChina: 1
+    - _EffectFresnelFactor: 1
+    - _EffectFresnelPower: 2
+    - _EffectFresnelSetting: 0
+    - _EffectFresnelSmooth: 1
+    - _EffectFresnelThreshold: 0
+    - _EffectMaskTip: 1
+    - _EmissionSetting: 0
+    - _Emission_ColorWeight: 1
+    - _Emission_Instensity: 1
+    - _EnvRotate: 0
+    - _EnvShadingSetting: 0
+    - _HairSecondarySpecularExponent: 74
+    - _HairSecondarySpecularShift_Black: -0.74
+    - _HairSecondarySpecularStrength: 2.07
+    - _HairShadowOffset: 0.012
+    - _HairShadowOffsetLeftRight: 0
+    - _HairShadowOffsetTip: 1
+    - _HairShadowOffsetTopDown: 0
+    - _HairShadowSetting: 0
+    - _HairSpecularExponent: 27
+    - _HairSpecularShift: -0.02
+    - _HairSpecularStrength: 3.92
+    - _HairSpecularTip: 1
+    - _HairSpread1: -0.266
+    - _HairSpread2: -0.56
+    - _HitRimFactor: 0
+    - _HitRimPower: 1
+    - _HitRimSmooth: 1
+    - _HitRimThreshold: 0
+    - _HitSetting: 0
+    - _IDMASKChina: 1
+    - _IndirectIntensity: 0
+    - _IsBakeGIMap: 0
+    - _LightMapTip: 1
+    - _MapSetting: 1
+    - _MaskTip: 1
+    - _MetaIntensity: 0
+    - _MetallicBias: 0
+    - _MetallicScale: 0
+    - _Mode: 0
+    - _MultipleLightBlend: 0.5
+    - _MultipleLightIntensity: 2.5
+    - _MultipleLightSetting: 0
+    - _ObjectCoordinateAxisHeight: 0
+    - _Offset_Z: 0
+    - _OutLineSetting: 0
+    - _OutlineType: 0
+    - _Outline_Width: 1
+    - _PlaneShadowDistanceDisappearPos: -0.5
+    - _PlaneShadowDistanceDisappearSoftness: 2.1
+    - _PlaneShadowHeightOffset: 0
+    - _PlaneShadowHorizontalOffset: 0
+    - _PlaneShadowSetting: 0
+    - _RampXOffset: 0
+    - _RampYOffset: 0
+    - _ReceiveShadowOff: 1
+    - _RimBlockBegin: 1
+    - _RimBlockEnd: 1
+    - _RimColorBlendAlbedo: 0.5
+    - _RimDepthWidth: 0.01
+    - _RimDirReverse: 0
+    - _RimLambertMaskBrightness: 0.5
+    - _RimLambertMaskThreshold: 0.5
+    - _RimLightBlendAlbedo: 0.094
+    - _RimLightBrightness: 1.17
+    - _RimLightDirIntensity: 0.134
+    - _RimLightRange: 0.1
+    - _RimLightSetting: 0
+    - _RimSetting: 0
+    - _RimThreshold: 0.65
+    - _RimUseCustomLightDirTip: 1
+    - _SHBrightness: 1
+    - _SHExposure: 1
+    - _SHMask: 1
+    - _SMOOTHMASKChina: 1
+    - _SPECUALINTENSITYMASKChina: 1
+    - _ShadowColorOffset: 0.2
+    - _ShadowColorTip: 1
+    - _ShadowIntensity: 1
+    - _ShadowOffsetTip: 1
+    - _ShadowSetting: 0
+    - _SmoothnessBias: 0.5
+    - _SmoothnessScale: 1
+    - _SpecSetting: 0
+    - _SpecularAlbedoWeight: 0
+    - _SpecularIntensity: 2
+    - _SpecularSetting: 1
+    - _SrcBlend: 1
+    - _Surface: 0
+    - _SurfaceSetting: 1
+    - _TransparentShadow: 0
+    - _USEOUTLINE: 0
+    - _USE_ENV_MASK: 1
+    - _USE_SH_MASK: 0
+    - _UseDiffuseBlendAO: 0
+    - _UseEffectFresnel: 0
+    - _UseEffectFresnelMask: 0
+    - _UseHalfLambert: 1
+    - _UseOtherLight: 0
+    - _WholeEmissionColorTip: 1
+    - _ZTest: 4
+    - _ZWrite: 1
+    - _useRim: 0
+    m_Colors:
+    - _AoColor: {r: 0, g: 0, b: 0, a: 1}
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _BlackRimColor: {r: 1, g: 1, b: 0.8245283, a: 1}
+    - _CharacterShadowColor: {r: 0.53, g: 0.53, b: 0.53, a: 1}
+    - _CubemapColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EffectFresnelColor: {r: 1, g: 1, b: 1, a: 1}
+    - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    - _HairSecondarySpecularCol: {r: 0.44, g: 0.44, b: 0.44, a: 1}
+    - _HairSpecularCol: {r: 0.69411767, g: 0.8, b: 0.5921569, a: 1}
+    - _HitRimColor: {r: 1, g: 1, b: 1, a: 1}
+    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
+    - _PlaneShadowColor: {r: 0, g: 0, b: 0, a: 0.6}
+    - _RimColor: {r: 1, g: 1, b: 0.8245283, a: 1}
+    - _RimLightColor: {r: 0.67058825, g: 0.6594771, b: 0.5372549, a: 1}
+    - _RimLightDir: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _WholeEmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - custom_SHAb: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHAg: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHAr: {r: 0, g: 0, b: 0, a: 0.2140411}
+    - custom_SHBb: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHBg: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHBr: {r: 0, g: 0, b: 0, a: 0}
+    - custom_SHC: {r: 0, g: 0, b: 0, a: 0}
+  m_BuildTextureStacks: []

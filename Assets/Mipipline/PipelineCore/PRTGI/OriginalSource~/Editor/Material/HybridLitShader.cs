@@ -1,0 +1,245 @@
+﻿using System;
+using UnityEditor;
+using UnityEditor.Rendering;
+using UnityEditor.Rendering.Universal.ShaderGUI;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Illusion.Rendering.Editor
+{
+    /// <summary>
+    /// Class for shader GUI for Hybrid Lit shader in IllusionRP.
+    /// </summary>
+    public class HybridLitShader : BaseShaderGUI
+    {
+        private struct LitHybridProperties
+        {
+            public readonly MaterialProperty OrderIndependentProp;
+
+            public readonly MaterialProperty ScreenSpaceReflectionsProp;
+
+            public readonly MaterialProperty ScreenSpaceAmbientOcclusionProp;
+
+            public LitHybridProperties(MaterialProperty[] properties)
+            {
+                OrderIndependentProp = FindProperty("_OrderIndependent", properties, false);
+
+                ScreenSpaceReflectionsProp = FindProperty("_ScreenSpaceReflections", properties, false);
+
+                ScreenSpaceAmbientOcclusionProp = FindProperty("_ScreenSpaceAmbientOcclusion", properties, false);
+            }
+        }
+
+        private new static class Styles
+        {
+            public static readonly GUIContent OrderIndependentText =
+                EditorGUIUtility.TrTextContent("Order Independent Transparency",
+                    "When enabled, the transparent Material will be drawn after accumulation and no need to set render queue order.");
+
+            public static readonly GUIContent ScreenSpaceReflectionsText =
+                EditorGUIUtility.TrTextContent("Screen Space Reflections",
+                    "When enabled, the Material will sample screen space reflections.");
+
+            public static readonly GUIContent ScreenSpaceAmbientOcclusionText =
+                EditorGUIUtility.TrTextContent("Screen Space Ambient Occlusion",
+                    "When enabled, the Material will receive screen space ambient occlusion.");
+        }
+
+        private static readonly string[] WorkflowModeNames = Enum.GetNames(typeof(LitGUI.WorkflowMode));
+
+        private LitGUI.LitProperties _litProperties;
+
+        private LitDetailGUI.LitProperties _litDetailProperties;
+
+        private LitHybridProperties _litHybridProperties;
+
+        public override void FillAdditionalFoldouts(MaterialHeaderScopeList materialScopesList)
+        {
+            materialScopesList.RegisterHeaderScope(LitDetailGUI.Styles.detailInputs, Expandable.Details, _ => LitDetailGUI.DoDetailArea(_litDetailProperties, materialEditor));
+        }
+
+        // collect properties from the material properties
+        public override void FindProperties(MaterialProperty[] properties)
+        {
+            base.FindProperties(properties);
+            _litProperties = new LitGUI.LitProperties(properties);
+            _litDetailProperties = new LitDetailGUI.LitProperties(properties);
+            _litHybridProperties = new LitHybridProperties(properties);
+        }
+
+        // material changed check
+        public override void ValidateMaterial(Material material)
+        {
+            SetMaterialKeywords(material, SetMaterialKeywords, LitDetailGUI.SetMaterialKeywords);
+        }
+
+        private void SetMaterialKeywords(Material material)
+        {
+            LitGUI.SetMaterialKeywords(material);
+
+            SynchronizePasses(material);
+            
+            int stencilRefDepth = 0;
+            int stencilWriteMaskDepth = (int)IllusionStencilUsage.ForwardGBufferWriteMask;
+
+            if (material.HasProperty(IllusionShaderProperties.ScreenSpaceReflections))
+            {
+                var receiveSSR = Mathf.Approximately(material.GetFloat(IllusionShaderProperties.ScreenSpaceReflections), 1.0f);
+                if (receiveSSR)
+                {
+                    stencilRefDepth |= (int)IllusionStencilUsage.TraceReflectionRay;
+                }
+            }
+
+            if (material.HasProperty(IllusionShaderProperties.ScreenSpaceAmbientOcclusion))
+            {
+                bool receiveSSAO = Mathf.Approximately(material.GetFloat(IllusionShaderProperties.ScreenSpaceAmbientOcclusion), 1.0f);
+                if (!receiveSSAO)
+                {
+                    stencilRefDepth |= (int)IllusionStencilUsage.NotReceiveAmbientOcclusion;
+                }
+            }
+
+            if (material.HasProperty(IllusionShaderProperties.StencilRefDepth) && material.HasProperty(IllusionShaderProperties.StencilWriteMaskDepth))
+            {
+                material.SetInt(IllusionShaderProperties.StencilRefDepth, stencilRefDepth);
+                material.SetInt(IllusionShaderProperties.StencilWriteMaskDepth, stencilWriteMaskDepth);
+            }
+        }
+
+        public static bool SynchronizePasses(Material material)
+        {
+            if (!material.HasProperty("_Surface"))
+                return false;
+            bool transparent = (SurfaceType)material.GetFloat("_Surface") == SurfaceType.Transparent;
+            bool orderIndependent = transparent
+                && material.HasProperty(IllusionShaderProperties.OrderIndependent)
+                && Mathf.Approximately(material.GetFloat(IllusionShaderProperties.OrderIndependent), 1f);
+            bool changed = material.GetShaderPassEnabled("ForwardGBuffer") != !transparent
+                || material.GetShaderPassEnabled("OIT") != orderIndependent
+                || material.GetShaderPassEnabled("UniversalForward") != !orderIndependent
+                || material.GetShaderPassEnabled("UniversalForwardOnly") != !orderIndependent;
+            if (changed)
+            {
+                material.SetShaderPassEnabled("ForwardGBuffer", !transparent);
+                material.SetShaderPassEnabled("OIT", orderIndependent);
+                material.SetShaderPassEnabled("UniversalForward", !orderIndependent);
+                material.SetShaderPassEnabled("UniversalForwardOnly", !orderIndependent);
+            }
+            return changed;
+        }
+
+        // material main surface options
+        public override void DrawSurfaceOptions(Material material)
+        {
+            // Use default labelWidth
+            EditorGUIUtility.labelWidth = 0f;
+
+            if (_litProperties.workflowMode != null)
+                DoPopup(LitGUI.Styles.workflowModeText, _litProperties.workflowMode, WorkflowModeNames);
+
+            base.DrawSurfaceOptions(material);
+        }
+
+        // material main surface inputs
+        public override void DrawSurfaceInputs(Material material)
+        {
+            base.DrawSurfaceInputs(material);
+            LitGUI.Inputs(_litProperties, materialEditor, material);
+            DrawEmissionProperties(material, true);
+            DrawTileOffset(materialEditor, baseMapProp);
+        }
+
+        // material main advanced options
+        public override void DrawAdvancedOptions(Material material)
+        {
+            if (_litProperties.highlights != null)
+            {
+                materialEditor.ShaderProperty(_litProperties.highlights, LitGUI.Styles.highlightsText);
+            }
+
+            if (_litProperties.reflections != null)
+            {
+                materialEditor.ShaderProperty(_litProperties.reflections, LitGUI.Styles.reflectionsText);
+            }
+
+            bool showQueueControl = true;
+            if (surfaceTypeProp != null && (SurfaceType)surfaceTypeProp.floatValue == SurfaceType.Transparent)
+            {
+                if (_litHybridProperties.OrderIndependentProp != null)
+                {
+                    materialEditor.ShaderProperty(_litHybridProperties.OrderIndependentProp, Styles.OrderIndependentText);
+                    if (Mathf.Approximately(_litHybridProperties.OrderIndependentProp.floatValue, 1))
+                    {
+                        showQueueControl = false;
+                    }
+                }
+            }
+
+            DrawFloatToggleProperty(Styles.ScreenSpaceReflectionsText, _litHybridProperties.ScreenSpaceReflectionsProp);
+
+            DrawFloatToggleProperty(Styles.ScreenSpaceAmbientOcclusionText, _litHybridProperties.ScreenSpaceAmbientOcclusionProp);
+
+            if (showQueueControl)
+            {
+                // Only draw the sorting priority field if queue control is set to "auto"
+                bool autoQueueControl = GetAutomaticQueueControlSetting(material);
+                if (autoQueueControl)
+                    DrawQueueOffsetField();
+            }
+            materialEditor.EnableInstancingField();
+        }
+    }
+
+    internal static class WaterReflectionModeMaterialState
+    {
+        private const string LegacyKeyword = "_WATER_REFLECTION_LEGACY";
+        private const string WaterSsrDataPass = "WaterSSRData";
+
+        internal static void Synchronize(Material material)
+        {
+            if (material == null || !material.HasProperty(IllusionShaderProperties.WaterReflectionMode))
+                return;
+
+            bool useLegacyReflection = material.GetFloat(IllusionShaderProperties.WaterReflectionMode) > 0.5f;
+            if (material.IsKeywordEnabled(LegacyKeyword) != useLegacyReflection)
+                CoreUtils.SetKeyword(material, LegacyKeyword, useLegacyReflection);
+
+            bool enableWaterSsrData = !useLegacyReflection;
+            if (material.GetShaderPassEnabled(WaterSsrDataPass) != enableWaterSsrData)
+                material.SetShaderPassEnabled(WaterSsrDataPass, enableWaterSsrData);
+        }
+    }
+
+    internal sealed class WaterReflectionModeDrawer : MaterialPropertyDrawer
+    {
+        private static readonly string[] ModeNames = { "Screen Space", "Legacy" };
+
+        private static readonly GUIContent Label = new(
+            "Water Reflection Mode",
+            "Uses the reflection implementation provided by the Water shader.");
+
+        public override void OnGUI(Rect position, MaterialProperty prop, string label, MaterialEditor editor)
+        {
+            int mode = Mathf.Clamp(Mathf.RoundToInt(prop.floatValue), 0, ModeNames.Length - 1);
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUI.showMixedValue = prop.hasMixedValue;
+            Rect popupPosition = EditorGUI.PrefixLabel(position, Label);
+            mode = EditorGUI.Popup(popupPosition, mode, ModeNames);
+            EditorGUI.showMixedValue = false;
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                editor.RegisterPropertyChangeUndo(Label.text);
+                prop.floatValue = mode;
+            }
+
+            foreach (UnityEngine.Object target in editor.targets)
+            {
+                if (target is Material material)
+                    WaterReflectionModeMaterialState.Synchronize(material);
+            }
+        }
+    }
+}

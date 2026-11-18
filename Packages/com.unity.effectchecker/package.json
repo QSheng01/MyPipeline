@@ -1,0 +1,13 @@
+{
+  "name": "com.unity.effectchecker",
+  "displayName": "EffectChecker",
+  "description": "set",
+  "version": "1.0.0",
+  "unity": "2020.3",
+  "license": "MIT",
+  "dependencies": {
+  },
+  "author": {
+    "name": "SYEngine"
+  }
+}

@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bd00321741b009d408a3d786b8759ae9, type: 3}
+  m_Name: Terrain
+  m_EditorClassIdentifier: 
+  TerrainMaterial: {fileID: 2100000, guid: 0d7811795e6c84f45b3e513018cae953, type: 2}
+  TreeData: {fileID: 4900000, guid: 3ba82fca1f0e34c48a3d35676bded1fe, type: 3}
+  MeshDataPack: 4
+  MeshPrefix: Terrain
+  HeightMap: {fileID: 4900000, guid: 0f3fd1aceb1fcc842995b2b17d2531b3, type: 3}
+  HeightmapScale: {x: 1, y: 2049, z: 1}
+  HeightmapResolution: 2049
+  DetailPrototypes: []
+  DetailWidth: 1024
+  DetailHeight: 1024
+  DetailResolutionPerPatch: 32
+  DetailLayers: {fileID: 4900000, guid: efb82e584768dc94a85eab787842b81a, type: 3}

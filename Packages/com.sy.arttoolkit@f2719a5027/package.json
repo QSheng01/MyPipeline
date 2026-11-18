@@ -1,0 +1,14 @@
+{
+  "name": "com.sy.arttoolkit",
+  "displayName": "ArtToolkit",
+  "description": "\u8fd9\u662f\u4e00\u4e2a\u7f8e\u672f\u5de5\u5177\u7bb1",
+  "version": "1.0.6",
+  "unity": "2020.3",
+  "documentationUrl": "http://developer.shiyuegame.com/showdoc/web/#/149?page_id=3401",
+  "changelogUrl": "http://www.baidu.com",
+  "licensesUrl": "http://www.baidu.com",
+  "license": "MIT",
+  "author": {
+    "name": "SYEngine"
+  }
+}

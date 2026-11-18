@@ -1,0 +1,366 @@
+// GPU 端草地裁剪 Compute Shader
+// Kernel 0: CullBlocks       - 距离裁剪 + 视锥裁剪 + Hi-Z 遮挡剔除，输出可见 block 列表
+// Kernel 1: BuildIndirectArgs - 构建 IndirectArgs 前缀和 + VisibleBlock 前缀和 + 逐 block 写入偏移
+// Kernel 2: OutputInstances   - 逐矩阵并行输出 (二分查找所属 block, 无原子操作, 线程负载均衡)
+// Kernel 3: GenerateHiZ       - 生成 Hi-Z 深度金字塔 (2x2 降采样)
+
+#pragma kernel CullBlocks
+#pragma kernel BuildIndirectArgs
+#pragma kernel OutputInstances
+#pragma kernel GenerateHiZ
+
+#include "HLSLSupport.cginc"
+
+// ===== 数据结构 =====
+
+struct BlockInfo
+{
+    uint type;
+    uint matrixStart;
+    uint matrixCount;
+    float3 boundsCenter;
+    float3 boundsExtents;
+};
+
+struct VisibleBlock
+{
+    uint type;
+    uint lod;
+    uint matrixStart;
+    uint matrixCount;
+    uint outputOffset;  // 该 block 在其 type*lod 区段内的写入起始偏移 (BuildIndirectArgs 中计算)
+};
+
+// ===== 全局参数 =====
+
+float4x4 _FVP;
+float4 _CameraPos;
+float4 _PlayerPos;
+float4 _GrassLod;        // xyz = (lod0距离, lod1距离, lod2距离/最远裁剪距离)
+uint _BlockCount;
+uint _TypeNum;
+uint _LodNum;
+float _RenderExtent2Sq;
+
+// Hi-Z 参数
+float4x4 _GPUVP;         // GPU 投影矩阵 (C# 端已烘入 Y 翻转, 无需 shader 再翻)
+float4 _HiZParams;       // x=width, y=height, z=maxMipLevel, w=enabled (0 或 1)
+
+// ===== 缓冲区 =====
+
+StructuredBuffer<BlockInfo>         _AllBlockBuffer;
+StructuredBuffer<float4x4>          _AllMatrixBuffer;
+RWStructuredBuffer<VisibleBlock>    _VisibleBlocks;
+RWStructuredBuffer<uint>            _Counters;
+// _Counters[0]   = 可见 block 数量
+// _Counters[1..] = 每个 type*lod 槽位的实例数量
+
+RWStructuredBuffer<uint>            _IndirectArgs;
+RWStructuredBuffer<uint>            _DispatchArgs;
+RWStructuredBuffer<float4x4>        _OutputMatrix;
+
+// 改进1+4: 逐矩阵并行所需的前缀和
+RWStructuredBuffer<uint>            _VisibleBlockPrefixSum;
+// _VisibleBlockPrefixSum[i] = block 0..i-1 的矩阵总数
+// _VisibleBlockPrefixSum[visibleCount] = 所有可见 block 的矩阵总数
+
+// Hi-Z 纹理
+Texture2D<float> _HiZTexture;
+RWTexture2D<float> _HiZOutput;
+int _HiZSrcMip;
+uint2 _HiZOutputSize;
+
+// 诊断缓冲区 (可删除, 仅调试用)
+RWStructuredBuffer<float4> _HiZDebug;
+
+// ===== 视锥裁剪 =====
+
+bool IsOutsideFrustum(float3 center, float3 extents)
+{
+    float3 minP = center - extents;
+    float3 maxP = center + extents;
+
+    float4 a0 = mul(_FVP, float4(minP, 1));
+    float4 a1 = mul(_FVP, float4(minP.xy, maxP.z, 1));
+    float4 a2 = mul(_FVP, float4(minP.x, maxP.y, minP.z, 1));
+    float4 a3 = mul(_FVP, float4(minP.x, maxP.yz, 1));
+    float4 a4 = mul(_FVP, float4(maxP.x, minP.yz, 1));
+    float4 a5 = mul(_FVP, float4(maxP.x, minP.y, maxP.z, 1));
+    float4 a6 = mul(_FVP, float4(maxP.xy, minP.z, 1));
+    float4 a7 = mul(_FVP, float4(maxP, 1));
+
+    float4 x0 = float4(a0.x, a1.x, a2.x, a3.x);
+    float4 x1 = float4(a4.x, a5.x, a6.x, a7.x);
+    float4 y0 = float4(a0.y, a1.y, a2.y, a3.y);
+    float4 y1 = float4(a4.y, a5.y, a6.y, a7.y);
+    float4 z0 = float4(a0.z, a1.z, a2.z, a3.z);
+    float4 z1 = float4(a4.z, a5.z, a6.z, a7.z);
+    float4 w0 = float4(a0.w, a1.w, a2.w, a3.w);
+    float4 w1 = float4(a4.w, a5.w, a6.w, a7.w);
+
+    return (all(x0 < -w0) && all(x1 < -w1)) ||
+           (all(x0 >  w0) && all(x1 >  w1)) ||
+           (all(y0 < -w0) && all(y1 < -w1)) ||
+           (all(y0 >  w0) && all(y1 >  w1)) ||
+           (all(z0 < -w0) && all(z1 < -w1)) ||
+           (all(z0 >  w0) && all(z1 >  w1));
+}
+
+// ===== Hi-Z 遮挡剔除 =====
+// 将 AABB 投影到屏幕空间, 用 Hi-Z 深度金字塔判断是否被完全遮挡
+
+bool IsOccludedByHiZ(float3 center, float3 extents)
+{
+    if (_HiZParams.w < 0.5)
+        return false;
+
+    if (_HiZParams.w > 1.5)
+        return true;
+
+    float3 minP = center - extents;
+    float3 maxP = center + extents;
+
+    float4 c0 = mul(_GPUVP, float4(minP, 1));
+    float4 c1 = mul(_GPUVP, float4(minP.xy, maxP.z, 1));
+    float4 c2 = mul(_GPUVP, float4(minP.x, maxP.y, minP.z, 1));
+    float4 c3 = mul(_GPUVP, float4(minP.x, maxP.yz, 1));
+    float4 c4 = mul(_GPUVP, float4(maxP.x, minP.yz, 1));
+    float4 c5 = mul(_GPUVP, float4(maxP.x, minP.y, maxP.z, 1));
+    float4 c6 = mul(_GPUVP, float4(maxP.xy, minP.z, 1));
+    float4 c7 = mul(_GPUVP, float4(maxP, 1));
+
+    float4 cs[8] = { c0, c1, c2, c3, c4, c5, c6, c7 };
+
+    float2 screenMin = float2(1, 1);
+    float2 screenMax = float2(0, 0);
+    #if UNITY_REVERSED_Z
+    float nearestZ = 0.0;
+    #else
+    float nearestZ = 1.0;
+    #endif
+
+    [unroll]
+    for (int i = 0; i < 8; i++)
+    {
+        if (cs[i].w <= 0)
+            return false;
+
+        float3 ndc = cs[i].xyz / cs[i].w;
+        float2 uv = ndc.xy * 0.5 + 0.5;
+
+        screenMin = min(screenMin, uv);
+        screenMax = max(screenMax, uv);
+
+        #if UNITY_REVERSED_Z
+        nearestZ = max(nearestZ, ndc.z);
+        #else
+        nearestZ = min(nearestZ, ndc.z);
+        #endif
+    }
+
+    screenMin = saturate(screenMin);
+    screenMax = saturate(screenMax);
+
+    // 选取 mip: 使 AABB 屏幕矩形覆盖 ~2~4 texel
+    float2 hiZSize = _HiZParams.xy;
+    float2 rectPixels = (screenMax - screenMin) * hiZSize;
+    float maxDim = max(max(rectPixels.x, rectPixels.y), 1.0);
+    int mip = clamp((int)floor(log2(maxDim)), 0, (int)_HiZParams.z);
+
+    int mipW = max(1, (int)hiZSize.x >> mip);
+    int mipH = max(1, (int)hiZSize.y >> mip);
+
+    int2 tMin = clamp(int2(screenMin * float2(mipW, mipH)), int2(0, 0), int2(mipW - 1, mipH - 1));
+    int2 tMax = clamp(int2(screenMax * float2(mipW, mipH)), int2(0, 0), int2(mipW - 1, mipH - 1));
+    int2 tMid = (tMin + tMax) / 2;
+
+    float d0 = _HiZTexture.Load(int3(tMin.x, tMin.y, mip));
+    float d1 = _HiZTexture.Load(int3(tMax.x, tMin.y, mip));
+    float d2 = _HiZTexture.Load(int3(tMin.x, tMax.y, mip));
+    float d3 = _HiZTexture.Load(int3(tMax.x, tMax.y, mip));
+    float d4 = _HiZTexture.Load(int3(tMid.x, tMid.y, mip));
+
+    float farthestDrawn;
+    bool occluded;
+    #if UNITY_REVERSED_Z
+    farthestDrawn = min(min(min(d0, d1), min(d2, d3)), d4);
+    occluded = nearestZ < farthestDrawn - 0.0001;
+    #else
+    farthestDrawn = max(max(max(d0, d1), max(d2, d3)), d4);
+    occluded = nearestZ > farthestDrawn + 0.0001;
+    #endif
+
+    return occluded;
+}
+
+// ===== Kernel 0: CullBlocks =====
+
+[numthreads(64, 1, 1)]
+void CullBlocks(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _BlockCount)
+        return;
+
+    BlockInfo block = _AllBlockBuffer[id.x];
+    if (block.matrixCount == 0)
+        return;
+
+    // 玩家距离检查
+    float2 playerDiff = block.boundsCenter.xz - _PlayerPos.xz;
+    float playerDist2 = dot(playerDiff, playerDiff);
+    if (playerDist2 > _RenderExtent2Sq)
+        return;
+
+    // 相机距离检查
+    float2 camDiff = block.boundsCenter.xz - _CameraPos.xz;
+    float camDist2 = dot(camDiff, camDiff);
+    float maxDist = _GrassLod.z;
+    if (camDist2 > maxDist * maxDist)
+        return;
+
+    // 视锥裁剪
+    if (IsOutsideFrustum(block.boundsCenter, block.boundsExtents))
+        return;
+
+    // Hi-Z 遮挡剔除 (使用上一帧深度)
+    if (IsOccludedByHiZ(block.boundsCenter, block.boundsExtents))
+        return;
+
+    // 确定 LOD 等级
+    uint lod;
+    if (camDist2 < _GrassLod.x * _GrassLod.x)
+        lod = 0;
+    else if (camDist2 < _GrassLod.y * _GrassLod.y)
+        lod = 1;
+    else
+        lod = 2;
+
+    uint visIdx;
+    InterlockedAdd(_Counters[0], 1, visIdx);
+
+    VisibleBlock vb;
+    vb.type = block.type;
+    vb.lod = lod;
+    vb.matrixStart = block.matrixStart;
+    vb.matrixCount = block.matrixCount;
+    vb.outputOffset = 0;  // 后续 BuildIndirectArgs 填写
+    _VisibleBlocks[visIdx] = vb;
+
+    uint slotIdx = block.type * _LodNum + lod;
+    InterlockedAdd(_Counters[1 + slotIdx], block.matrixCount);
+}
+
+// ===== Kernel 1: BuildIndirectArgs =====
+// 职责:
+//   1. 构建 IndirectArgs 前缀和 (type*lod → 输出矩阵区段偏移)
+//   2. 遍历可见 block 列表, 计算:
+//      a. _VisibleBlockPrefixSum (用于 OutputInstances 二分查找)
+//      b. 每个 block 在其 type*lod 区段内的 outputOffset (用于 OutputInstances 定位写入)
+//   3. 计算 OutputInstances 的 DispatchIndirect 参数 (基于总可见矩阵数而非 block 数)
+
+[numthreads(1, 1, 1)]
+void BuildIndirectArgs(uint3 id : SV_DispatchThreadID)
+{
+    uint totalSlots = _TypeNum * _LodNum;
+
+    // --- 步骤 1: 构建 IndirectArgs 前缀和 ---
+    uint globalOffset = 0;
+    for (uint i = 0; i < totalSlots; i++)
+    {
+        uint count = _Counters[1 + i];
+        _IndirectArgs[i * 5 + 1] = count;
+        _IndirectArgs[i * 5 + 4] = globalOffset;
+        globalOffset += count;
+    }
+
+    // --- 步骤 2: 遍历可见 block, 计算 prefix sum + 逐 block 输出偏移 ---
+    uint visibleCount = _Counters[0];
+
+    // 每个 type*lod 槽位的累计偏移 (局部变量, 用于计算 block 写入位置)
+    // 最多支持 8 种 type * 3 级 LOD = 24 个槽位
+    uint slotRunning[24];
+    for (uint s = 0; s < totalSlots && s < 24; s++)
+        slotRunning[s] = 0;
+
+    uint prefixSum = 0;
+    for (uint vi = 0; vi < visibleCount; vi++)
+    {
+        _VisibleBlockPrefixSum[vi] = prefixSum;
+
+        VisibleBlock vb = _VisibleBlocks[vi];
+
+        // 填写该 block 在其 type*lod 区段内的写入偏移
+        uint slotIdx = vb.type * _LodNum + vb.lod;
+        vb.outputOffset = slotRunning[slotIdx];
+        slotRunning[slotIdx] += vb.matrixCount;
+        _VisibleBlocks[vi] = vb;
+
+        prefixSum += vb.matrixCount;
+    }
+    _VisibleBlockPrefixSum[visibleCount] = prefixSum; // 哨兵: 总可见矩阵数
+
+    // --- 步骤 3: 计算逐矩阵 OutputInstances 的 DispatchIndirect 参数 ---
+    _DispatchArgs[0] = (prefixSum + 63) / 64;
+    _DispatchArgs[1] = 1;
+    _DispatchArgs[2] = 1;
+}
+
+// ===== Kernel 2: OutputInstances =====
+// 改进后: 每个线程处理 1 个矩阵 (而非 1 个 block)
+// 通过二分查找 _VisibleBlockPrefixSum 确定所属 block, 无原子操作, 线程负载完全均衡
+
+[numthreads(64, 1, 1)]
+void OutputInstances(uint3 id : SV_DispatchThreadID)
+{
+    uint visibleCount = _Counters[0];
+    uint totalMatrices = _VisibleBlockPrefixSum[visibleCount];
+    if (id.x >= totalMatrices)
+        return;
+
+    uint globalIdx = id.x;
+
+    // 二分查找: 找到 globalIdx 属于哪个可见 block
+    uint lo = 0, hi = visibleCount;
+    while (lo < hi)
+    {
+        uint mid = (lo + hi) >> 1;
+        if (_VisibleBlockPrefixSum[mid + 1] <= globalIdx)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    // lo = 该矩阵所属的 visible block 索引
+
+    VisibleBlock vb = _VisibleBlocks[lo];
+    uint localIdx = globalIdx - _VisibleBlockPrefixSum[lo]; // 该矩阵在 block 内的局部索引
+
+    uint slotIdx = vb.type * _LodNum + vb.lod;
+    uint baseOffset = _IndirectArgs[slotIdx * 5 + 4];       // type*lod 区段在输出缓冲区的起始偏移
+    uint blockOffset = vb.outputOffset;                      // block 在区段内的起始偏移
+
+    _OutputMatrix[baseOffset + blockOffset + localIdx] = _AllMatrixBuffer[vb.matrixStart + localIdx];
+}
+
+// ===== Kernel 3: GenerateHiZ =====
+// 2x2 降采样生成 Hi-Z 深度金字塔
+// UNITY_REVERSED_Z: reversed-Z 取 min, standard-Z 取 max
+
+[numthreads(8, 8, 1)]
+void GenerateHiZ(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _HiZOutputSize.x || id.y >= _HiZOutputSize.y)
+        return;
+
+    // 从源 mip 级别读取 2x2 像素
+    int2 srcBase = int2(id.xy) * 2;
+    float d0 = _HiZTexture.Load(int3(srcBase, _HiZSrcMip));
+    float d1 = _HiZTexture.Load(int3(srcBase + int2(1, 0), _HiZSrcMip));
+    float d2 = _HiZTexture.Load(int3(srcBase + int2(0, 1), _HiZSrcMip));
+    float d3 = _HiZTexture.Load(int3(srcBase + int2(1, 1), _HiZSrcMip));
+
+    #if UNITY_REVERSED_Z
+    _HiZOutput[id.xy] = min(min(d0, d1), min(d2, d3));
+    #else
+    _HiZOutput[id.xy] = max(max(d0, d1), max(d2, d3));
+    #endif
+}

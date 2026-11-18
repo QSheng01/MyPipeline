@@ -1,0 +1,492 @@
+// URP port of the HDRP volumetric clouds pipeline (distant clouds).
+// Pipeline: [DepthDownsample fragment pass] -> RenderClouds (1/4 res, checkerboard) -> ReprojectClouds (1/2 res, temporal) -> UpscaleAndCombine (full res)
+
+#pragma kernel RenderClouds
+#pragma kernel ReprojectClouds
+#pragma kernel UpscaleAndCombine
+
+#include "VolumetricCloudsUtilities.hlsl"
+
+//--------------------------------------------------------------------------------------------------
+// IO
+//--------------------------------------------------------------------------------------------------
+// Trace outputs
+RWTexture2D<float4> _CloudsLightingTextureRW;
+RWTexture2D<float>  _CloudsDepthTextureRW;
+
+// Reproject IO
+Texture2D<float4>   _CloudsLightingTexture;   // trace lighting
+Texture2D<float>    _CloudsDepthTexture;       // trace depth
+    Texture2D<float4>   _HalfResDepthBuffer;       // intermediate scene depth. Dual: .x=min/far, .y=max/near. Checkerboard(R32): .x holds the cell's single extreme (declared float4 to bind either R32 or RG32 safely)
+    Texture2D<float4>   _HistoryVolumetricClouds0Texture;
+Texture2D<float4>   _HistoryVolumetricClouds1Texture;
+RWTexture2D<float4> _CloudsAdditionalTextureRW; // current history1 (sampleCount, depth, cloudDepth)
+
+// Upscale IO
+Texture2D<float4>   _VolumetricCloudsTexture;  // intermediate (history0) lighting
+Texture2D<float4>   _DepthStatusTexture;       // intermediate history1
+Texture2D<float4>   _CameraColorCopy;
+RWTexture2D<float4> _VolumetricCloudsUpscaleTextureRW;
+
+// Upscale source/depth sizes (decoupled so we can skip ReprojectClouds and upscale the raw trace
+// directly). Normal path: both = intermediate size. Skip-reproject path: _UpscaleSourceSize = trace
+// size (the RenderClouds output resolution), while _HalfResDepthSize stays the half-res depth size.
+float4 _UpscaleSourceSize;   // xy = cloud lighting/status source size, zw = 1/size
+float4 _HalfResDepthSize;    // xy = _HalfResDepthBuffer size, zw = 1/size
+float  _SkipReprojection;    // 1 = second pass (trace) feeds the composite directly, no temporal data
+
+float Hash21(float2 p, int frame)
+{
+    p += frame * 0.61803398875;
+    return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453123);
+}
+
+// Conservative half-res scene depth (reversed-Z min = farthest). In single-channel checkerboard mode a
+// Max cell only stores the near depth, so we fetch the adjacent Min cell to recover a far value. This
+// keeps sky/occlusion classification conservative (avoids checkered cloud visibility at silhouettes).
+float HalfResFarDepth(int2 c)
+{
+    float v = _HalfResDepthBuffer.Load(int3(c, 0)).x;
+    if (!_CheckerboardMinMaxDepth)
+        return v;                         // dual layout: .x is already the min (far)
+    if (((c.x + c.y) & 1) == 0)
+        return v;                         // even = Min cell -> already far
+    // Odd = Max cell (stores near). Take a horizontally adjacent (parity-flipped) Min cell.
+    int nx = (c.x + 1 <= (int)_HalfResDepthSize.x - 1) ? (c.x + 1) : (c.x - 1);
+    return _HalfResDepthBuffer.Load(int3(int2(nx, c.y), 0)).x;
+}
+
+// RDR2 (Slide 55) ray placement: on a depth-varying 2x2 tile, move the traced sub-pixel to the
+// depth extreme that the neighborhood under-represents, so every reconstructed pixel has a fresh
+// sample for both near and far depth in its 3x3 neighborhood. Flat tiles keep the checkerboard index.
+// MUST be evaluated identically in RenderClouds and ReprojectClouds so the "traced this frame" test
+// stays consistent (both read the same _HalfResDepthBuffer and _SubPixelIndex).
+// wantNear (out): true when this frame's ray targets the tile's NEAR surface, so the caller clips the
+// ray at the max (nearest) depth channel instead of the min (farthest). Both channels of the half-res
+// depth buffer are used, so sub-texel depth edges (an edge crossing inside a single half-res texel)
+// are detected too - that's the whole point of the min/max downsample.
+int PickRayIndexByDepth(int2 traceCoord, int cb, out bool wantNear)
+{
+    wantNear = false;
+    uint2 maxC = (uint2)_IntermediateScreenSize.xy - 1;
+    int2 baseC = traceCoord * 2;
+
+    // Each half-res texel stores (.x = min = farthest, .y = max = nearest) of its 2x2 full-res block.
+    float2 t0 = _HalfResDepthBuffer.Load(int3(min((uint2)(baseC + int2(0, 0)), maxC), 0)).xy;
+    float2 t1 = _HalfResDepthBuffer.Load(int3(min((uint2)(baseC + int2(1, 0)), maxC), 0)).xy;
+    float2 t2 = _HalfResDepthBuffer.Load(int3(min((uint2)(baseC + int2(0, 1)), maxC), 0)).xy;
+    float2 t3 = _HalfResDepthBuffer.Load(int3(min((uint2)(baseC + int2(1, 1)), maxC), 0)).xy;
+
+    // Tile extremes and the sub-pixel indices that hold them.
+    // Two layouts (see _CheckerboardMinMaxDepth):
+    //  - Full min/max (default): every sub-pixel exposes both .x (far) and .y (near).
+    //  - Checkerboard (RDR2): each cell exposes only ONE extreme by parity. Since baseC is even,
+    //    within the tile idx {0,3} are Min cells (far, use .x) and idx {1,2} are Max cells (near, use .y).
+    float tileFar, tileNear;
+    int nearIdx, farIdx;
+    if (_CheckerboardMinMaxDepth)
+    {
+        // Single channel by parity: idx {0,3} are Min cells (far in .x), idx {1,2} are Max cells (near in .x).
+        tileFar  = min(t0.x, t3.x);
+        farIdx   = (t0.x <= t3.x) ? 0 : 3;
+        tileNear = max(t1.x, t2.x);
+        nearIdx  = (t1.x >= t2.x) ? 1 : 2;
+    }
+    else
+    {
+        tileFar  = min(min(t0.x, t1.x), min(t2.x, t3.x));
+        tileNear = max(max(t0.y, t1.y), max(t2.y, t3.y));
+
+        nearIdx = 0; float bestNear = t0.y;
+        if (t1.y > bestNear) { bestNear = t1.y; nearIdx = 1; }
+        if (t2.y > bestNear) { bestNear = t2.y; nearIdx = 2; }
+        if (t3.y > bestNear) { bestNear = t3.y; nearIdx = 3; }
+
+        farIdx = 0; float bestFar = t0.x;
+        if (t1.x < bestFar) { bestFar = t1.x; farIdx = 1; }
+        if (t2.x < bestFar) { bestFar = t2.x; farIdx = 2; }
+        if (t3.x < bestFar) { bestFar = t3.x; farIdx = 3; }
+    }
+
+    // Depth-flat tile (no discontinuity, even at sub-texel level): keep the checkerboard cadence.
+    if (tileNear - tileFar < 1e-6)
+        return cb;
+
+    float curNearLin = LinearEyeDepth(tileNear, _CloudsZBufferParams);
+    float curFarLin  = LinearEyeDepth(tileFar,  _CloudsZBufferParams);
+
+    // Coverage test: assume the 8 neighbors use the base checkerboard placement (breaks the circular
+    // dependency and keeps this deterministic + identical in RenderClouds/ReprojectClouds). Read the
+    // linear scene depth at each neighbor's would-be ray position. A tile extreme is "uncovered" only
+    // if it differs from EVERY neighbor's sampled depth by more than the relative threshold.
+    bool nearUncovered = true;
+    bool farUncovered  = true;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    [unroll]
+    for (int x = -1; x <= 1; ++x)
+    {
+        if (x == 0 && y == 0) continue;
+        int2 ntc = clamp(traceCoord + int2(x, y), 0, (int2)_TraceScreenSize.xy - 1);
+        int nbCb = ComputeCheckerBoardIndex(ntc, _SubPixelIndex);
+        uint2 nbCoord = min((uint2)(ntc * 2) + HalfResolutionIndexToOffset(nbCb), maxC);
+        // The value at the neighbor's ray position: dual layout -> .x (its far/min under base placement);
+        // checkerboard -> .x holds that cell's single stored extreme (min or max by parity). Either way .x.
+        float nbDepth = _HalfResDepthBuffer.Load(int3(nbCoord, 0)).x;
+        float nbLin = LinearEyeDepth(nbDepth, _CloudsZBufferParams);
+        float thr = _RayPlacementDepthThreshold * nbLin;
+        if (abs(curNearLin - nbLin) <= thr) nearUncovered = false;
+        if (abs(curFarLin  - nbLin) <= thr) farUncovered  = false;
+    }
+
+    // Prioritise the near surface (matters most for silhouettes/occlusion), then the far surface.
+    if (nearUncovered) { wantNear = true;  return nearIdx; }
+    if (farUncovered)  { wantNear = false; return farIdx;  }
+    return cb;
+}
+
+//--------------------------------------------------------------------------------------------------
+// Render (ray march) at trace (quarter) resolution
+// (Depth downscaling is done in a fragment pass, see VolumetricCloudsDepthDownsample.shader,
+//  because compute shaders cannot read URP's globally-bound _CameraDepthTexture.)
+//--------------------------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void RenderClouds(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_TraceScreenSize.xy))
+        return;
+
+    uint2 traceCoord = id.xy;
+    uint2 intermediateCoord;
+    bool wantNear = false;
+    if (_LowResolutionEvaluation != 0 && _EnableIntegration)
+    {
+        int cb = ComputeCheckerBoardIndex((int2)traceCoord, _SubPixelIndex);
+        if (_UseMinMaxDepth)
+            cb = PickRayIndexByDepth((int2)traceCoord, cb, wantNear);
+        intermediateCoord = traceCoord * 2 + HalfResolutionIndexToOffset(cb);
+    }
+    else
+        intermediateCoord = traceCoord;
+    intermediateCoord = min(intermediateCoord, (uint2)_IntermediateScreenSize.xy - 1);
+
+    float offset = 0.0;
+    if (_LowResolutionEvaluation != 0 && _EnableIntegration)
+        offset = _UseBlueNoise ? GetBNDSequenceSample(intermediateCoord, _AccumulationFrameIndex, 0) : Hash21(intermediateCoord, _AccumulationFrameIndex);
+
+    CloudRay ray;
+    ZERO_INITIALIZE(CloudRay, ray);
+    ray.integrationNoise = offset;
+    ray.direction = GetCloudViewDirWS(intermediateCoord, _IntermediateScreenSize.xy);
+
+    if (_LocalClouds)
+    {
+        // Camera can be anywhere: start at the actual camera world position, clip the ray at scene depth.
+        ray.originWS = _CloudsCameraPosWS;
+        // When the ray was placed to represent the tile's near surface, clip it at the nearest depth so
+        // it actually stops at that geometry; otherwise use the conservative farthest.
+        // Dual layout: .y = near, .x = far. Checkerboard: the placed cell's single .x already holds the
+        // wanted extreme (near cell for wantNear, far cell otherwise).
+        float2 sd = _HalfResDepthBuffer.Load(int3(intermediateCoord, 0)).xy;
+        float sceneDepth = _CheckerboardMinMaxDepth ? sd.x : (wantNear ? sd.y : sd.x);
+        bool isOccluded = sceneDepth != UNITY_RAW_FAR_CLIP_VALUE;
+        ray.depthValue = sceneDepth;
+        if (isOccluded)
+        {
+            float2 uv = (intermediateCoord + 0.5) * _IntermediateScreenSize.zw;
+            float3 posWS = ComputeWorldSpacePosition(uv, sceneDepth, _CloudsInvVP);
+            ray.maxRayLength = length(posWS - _CloudsCameraPosWS);
+        }
+        else
+            ray.maxRayLength = MAX_SKYBOX_VOLUMETRIC_CLOUDS_DISTANCE;
+            // Sky pixels: the ray must be able to reach the cloud layer (which can be well
+            // beyond the camera far clip plane). Do NOT clamp to _CloudFarPlane here, otherwise
+            // every ray gets cut before the clouds and the result is fully empty (black).
+           
+    }
+    else
+    {
+        // Distant "skybox" clouds: camera relative, always behind everything.
+        ray.originWS = float3(0, 0, 0);
+        ray.maxRayLength = MAX_SKYBOX_VOLUMETRIC_CLOUDS_DISTANCE;
+        ray.depthValue = UNITY_RAW_FAR_CLIP_VALUE;
+    }
+
+    // Distance to earth center & where the camera is relative to the cloud shell
+    ray.toEarthCenter = length(ray.originWS + float3(0, _EarthRadius, 0));
+    if (ray.toEarthCenter < _EarthRadius)
+        ray.insideClouds = -2.0;
+    else if (ray.toEarthCenter <= (_LowestCloudAltitude + _EarthRadius))
+        ray.insideClouds = -1.0;
+    else if (ray.toEarthCenter > (_HighestCloudAltitude + _EarthRadius))
+        ray.insideClouds = 1.0;
+    else
+        ray.insideClouds = 0.0;
+
+    // For distant clouds, cull rays that point below the horizon (earth would occlude them).
+    if (!_LocalClouds && RaySphereIntersection(ray.originWS, ray.direction, _EarthRadius))
+    {
+        _CloudsLightingTextureRW[traceCoord] = float4(0.0, 0.0, 0.0, 1.0);
+        _CloudsDepthTextureRW[traceCoord] = 0.0;
+        return;
+    }
+
+    VolumetricRayResult result = TraceVolumetricRay(ray);
+
+    _CloudsLightingTextureRW[traceCoord] = float4(result.inScattering, result.transmittance);
+    float minimalDistance = min(result.meanDistance, ray.maxRayLength);
+    // Store 0 when the ray hit no clouds so the neighborhood test can detect emptiness.
+    _CloudsDepthTextureRW[traceCoord] = result.invalidRay ? 0.0 : max(minimalDistance, _CloudNearPlane);
+}
+
+//--------------------------------------------------------------------------------------------------
+// Temporal reprojection & checkerboard resolve at intermediate (half) resolution
+//--------------------------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void ReprojectClouds(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_IntermediateScreenSize.xy))
+        return;
+
+    uint2 intermediateCoord = id.xy;
+    uint2 traceCoord = (_LowResolutionEvaluation != 0) ? (intermediateCoord / 2) : intermediateCoord;
+
+    float currentCloudDepth = _CloudsDepthTexture.Load(int3(traceCoord, 0));
+
+    // Reprojection: local clouds use the real cloud world position (parallax), distant treat as infinity.
+    float2 motionVector;
+    if (_LocalClouds)
+    {
+        float dist = currentCloudDepth > 0.0 ? currentCloudDepth : _CloudFarPlane;
+        motionVector = EvaluateCloudMotionVectors(intermediateCoord, _IntermediateScreenSize.xy, dist, 1.0);
+    }
+    else
+        motionVector = EvaluateCloudMotionVectors(intermediateCoord, _IntermediateScreenSize.xy, 0.0, 0.0);
+    float2 historyCoord = (intermediateCoord + 0.5) - motionVector * _IntermediateScreenSize.xy;
+    float2 clampedHistoryUV = clamp(historyCoord, 0.0, _IntermediateScreenSize.xy - 0.5f) / _IntermediateScreenSize.xy;
+
+    float2 ratioScale = _HistoryViewportSize / _HistoryBufferSize;
+    float2 historySampleCoords = clampedHistoryUV * ratioScale;
+
+    float4 previousResult = SAMPLE_TEXTURE2D_LOD(_HistoryVolumetricClouds0Texture, sampler_LinearClamp, historySampleCoords, 0);
+    float3 previousResult1 = SAMPLE_TEXTURE2D_LOD(_HistoryVolumetricClouds1Texture, sampler_LinearClamp, historySampleCoords, 0).xyz;
+
+    float previousSampleCount = previousResult1.x;
+    float previousDepth = previousResult1.y;
+    float previousCloudDepth = previousResult1.z;
+
+    bool validHistory = previousSampleCount >= 0.5f;
+    if (historyCoord.x < 0.0 || historyCoord.x >= _IntermediateScreenSize.x || historyCoord.y < 0.0 || historyCoord.y >= _IntermediateScreenSize.y)
+        validHistory = false;
+
+    float currentDepth = HalfResFarDepth((int2)intermediateCoord);
+
+    // Neighborhood clip (ghosting reduction) on background pixels
+    float validityFactor = 1.0;
+    float4 lightingMin = float4(FLT_MAX, FLT_MAX, FLT_MAX, 1.0);
+    float4 lightingMax = float4(0, 0, 0, 0.0);
+    float curLinDepth = LinearEyeDepth(currentDepth, _CloudsZBufferParams);
+    for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x)
+        {
+            int2 tc = clamp((int2)traceCoord + int2(x, y), 0, (int2)_TraceScreenSize.xy - 1);
+            // F1: drop neighbors whose scene depth differs strongly from the current pixel, so the
+            // color AABB isn't inflated across silhouettes (reduces ghosting in motion). The center
+            // sample is always kept so the AABB never degenerates to its init values.
+            if (_UseDepthRejection && !(x == 0 && y == 0))
+            {
+                uint2 depthCoord = (_LowResolutionEvaluation != 0) ? (uint2)(tc * 2) : (uint2)tc;
+                float nd = _HalfResDepthBuffer.Load(int3(min(depthCoord, (uint2)_IntermediateScreenSize.xy - 1), 0)).x;
+                float nLin = LinearEyeDepth(nd, _CloudsZBufferParams);
+                if (abs(nLin - curLinDepth) > _DepthRejectionThreshold * max(curLinDepth, 1.0))
+                    continue;
+            }
+            float4 cl = _CloudsLightingTexture.Load(int3(tc, 0));
+            lightingMin = min(lightingMin, cl);
+            lightingMax = max(lightingMax, cl);
+        }
+    // Distant: only clip on background pixels. Local: clouds are everywhere, so always clip.
+    if (_LocalClouds || currentDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        previousResult = ClipCloudsToRegion(previousResult, lightingMin, lightingMax, validityFactor);
+
+    int localIndex = 0;
+    int currentIndex = 0;
+    if (_LowResolutionEvaluation != 0)
+    {
+        localIndex = (intermediateCoord.x & 1) + (intermediateCoord.y & 1) * 2;
+        currentIndex = ComputeCheckerBoardIndex((int2)traceCoord, _SubPixelIndex);
+        if (_UseMinMaxDepth)
+        {
+            bool wantNearUnused;
+            currentIndex = PickRayIndexByDepth((int2)traceCoord, currentIndex, wantNearUnused);
+        }
+    }
+
+    if (localIndex == currentIndex)
+    {
+        // Freshly traced this frame -> accumulate with history
+        float cloudNeighborhood = 0.0f;
+        for (int y = -1; y <= 1; ++y)
+            for (int x = -1; x <= 1; ++x)
+            {
+                int2 tc = clamp((int2)traceCoord + int2(x, y), 0, (int2)_TraceScreenSize.xy - 1);
+                if (_CloudsLightingTexture.Load(int3(tc, 0)).w < 1.0f)
+                    cloudNeighborhood += 1.0f;
+            }
+
+        float accumulationFactor = 0.0;
+        float sampleCount = 1.0;
+        if (validHistory && cloudNeighborhood != 0.0f)
+        {
+            accumulationFactor = previousSampleCount >= 16.0 ? 0.94117647058 : (previousSampleCount / (previousSampleCount + 1.0));
+            accumulationFactor *= _TemporalAccumulationFactor * validityFactor * _CloudHistoryInvalidation;
+            sampleCount = min(previousSampleCount + 1.0, 16.0);
+        }
+
+        float4 traced = _CloudsLightingTexture.Load(int3(traceCoord, 0));
+        previousResult = accumulationFactor * previousResult + (1.0 - accumulationFactor) * traced;
+        previousSampleCount = sampleCount;
+        previousDepth = currentDepth;
+        previousCloudDepth = previousResult.w == 1.0 ? UNITY_RAW_FAR_CLIP_VALUE : currentCloudDepth;
+    }
+    else
+    {
+        // Not traced this frame -> rely on history, or fall back to the freshly traced neighbor.
+        previousSampleCount *= validityFactor * _CloudHistoryInvalidation;
+        if (!validHistory)
+        {
+            previousResult = _CloudsLightingTexture.Load(int3(traceCoord, 0));
+            previousSampleCount = 1.0f;
+            previousCloudDepth = currentCloudDepth;
+        }
+        previousDepth = currentDepth;
+    }
+
+    previousResult.w = saturate(previousResult.w);
+    _CloudsLightingTextureRW[intermediateCoord] = previousResult;
+    _CloudsAdditionalTextureRW[intermediateCoord] = float4(previousSampleCount, previousDepth, previousCloudDepth, 0.0);
+}
+
+//--------------------------------------------------------------------------------------------------
+// Depth-aware upscale (half -> full) and composite with the camera color
+//--------------------------------------------------------------------------------------------------
+float4 BilateralUpsample(uint2 fullCoord, float fullDepth)
+{
+    // Map full -> source texel space. Ratio is ~0.5 (Quarter) / ~1.0 (Half) / ~0.25 (skip-reproject: trace).
+    float2 upscaleRatio = _UpscaleSourceSize.xy / _FinalScreenSize.xy;
+    float2 halfUV = (fullCoord + 0.5) * upscaleRatio;
+    int2 baseCoord = (int2)floor(halfUV - 0.5);
+    float2 f = frac(halfUV - 0.5);
+
+    float4 sum = 0;
+    float wsum = 0;
+    bool fullIsBackground = (fullDepth == UNITY_RAW_FAR_CLIP_VALUE);
+
+    [unroll]
+    for (int y = 0; y <= 1; y++)
+    [unroll]
+    for (int x = 0; x <= 1; x++)
+    {
+        int2 c = clamp(baseCoord + int2(x, y), 0, (int2)_UpscaleSourceSize.xy - 1);
+        float bilW = ((x == 0) ? (1.0 - f.x) : f.x) * ((y == 0) ? (1.0 - f.y) : f.y);
+        // Distant: prefer half-res texels that share the background/foreground state (avoids halos at silhouettes).
+        // Local: clouds overlay everything and are low frequency, plain bilinear is enough.
+        // Skip-reproject: the source is the raw trace (no scene-depth status), so use plain bilinear.
+        float depthW = 1.0;
+        if (!_LocalClouds && _SkipReprojection == 0.0)
+        {
+            float halfDepth = _DepthStatusTexture.Load(int3(c, 0)).y;
+            bool halfIsBackground = (halfDepth == UNITY_RAW_FAR_CLIP_VALUE);
+            depthW = (halfIsBackground == fullIsBackground) ? 1.0 : 0.05;
+        }
+        float w = bilW * depthW + 1e-6;
+        sum += _VolumetricCloudsTexture.Load(int3(c, 0)) * w;
+        wsum += w;
+    }
+    return sum / wsum;
+}
+
+// F3: blue-noise dithered upscale (Stachowiak15 / Gjoel16). The sample center is jittered with an
+// animated hash so TAA resolves it into extra detail, and the jitter magnitude (kernel width) is
+// driven by the transmittance-weighted cloud depth: far clouds use a tight kernel to preserve detail,
+// near clouds a wider one for smoother gradients. Depth-aware weighting is preserved for distant clouds.
+float4 BlueNoiseUpsample(uint2 fullCoord, float fullDepth)
+{
+    // Map full -> source texel space. Ratio is ~0.5 (Quarter) / ~1.0 (Half) / ~0.25 (skip-reproject: trace).
+    float2 upscaleRatio = _UpscaleSourceSize.xy / _FinalScreenSize.xy;
+    uint2 hc = min((uint2)((fullCoord + 0.5) * upscaleRatio), (uint2)_UpscaleSourceSize.xy - 1);
+    // Cloud depth for kernel width: history1 stores it in .z; the raw trace depth (skip mode) is in .x.
+    float cloudDepth = _SkipReprojection != 0.0 ? _DepthStatusTexture.Load(int3(hc, 0)).x
+                                                : _DepthStatusTexture.Load(int3(hc, 0)).z;
+    float kernel = lerp(1.0, 0.35, saturate(cloudDepth / max(_MaxCloudDistance, 1.0)));
+
+    float jx = Hash21((float2)fullCoord, _AccumulationFrameIndex) - 0.5;
+    float jy = Hash21((float2)fullCoord + 19.7, _AccumulationFrameIndex) - 0.5;
+    float2 halfUV = (fullCoord + 0.5) * upscaleRatio + float2(jx, jy) * kernel;   // source texel space
+    int2 baseCoord = (int2)floor(halfUV - 0.5);
+    float2 f = frac(halfUV - 0.5);
+
+    bool fullIsBackground = (fullDepth == UNITY_RAW_FAR_CLIP_VALUE);
+    float4 sum = 0;
+    float wsum = 0;
+    [unroll]
+    for (int y = 0; y <= 1; y++)
+    [unroll]
+    for (int x = 0; x <= 1; x++)
+    {
+        int2 c = clamp(baseCoord + int2(x, y), 0, (int2)_UpscaleSourceSize.xy - 1);
+        float bilW = ((x == 0) ? (1.0 - f.x) : f.x) * ((y == 0) ? (1.0 - f.y) : f.y);
+        float depthW = 1.0;
+        if (!_LocalClouds && _SkipReprojection == 0.0)
+        {
+            float halfDepth = _DepthStatusTexture.Load(int3(c, 0)).y;
+            bool halfIsBackground = (halfDepth == UNITY_RAW_FAR_CLIP_VALUE);
+            depthW = (halfIsBackground == fullIsBackground) ? 1.0 : 0.05;
+        }
+        float w = bilW * depthW + 1e-6;
+        sum += _VolumetricCloudsTexture.Load(int3(c, 0)) * w;
+        wsum += w;
+    }
+    return sum / wsum;
+}
+
+float4 UpsampleClouds(uint2 fullCoord, float fullDepth)
+{
+    return _UseBlueNoiseUpscale ? BlueNoiseUpsample(fullCoord, fullDepth) : BilateralUpsample(fullCoord, fullDepth);
+}
+
+[numthreads(8, 8, 1)]
+void UpscaleAndCombine(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_FinalScreenSize.xy))
+        return;
+
+    uint2 fullCoord = id.xy;
+    // Read the (half-res) scene depth. Compute cannot read URP's global _CameraDepthTexture,
+    // so we rely on the downsampled copy produced by the fragment pass. Uses the depth-buffer size
+    // (always half-res) which is decoupled from the lighting source size (trace in skip-reproject mode).
+    float2 depthRatio = _HalfResDepthSize.xy / _FinalScreenSize.xy;
+    uint2 halfCoord = min((uint2)((fullCoord + 0.5) * depthRatio), (uint2)_HalfResDepthSize.xy - 1);
+    float highDepth = HalfResFarDepth((int2)halfCoord);
+
+    // Local clouds are composited on every pixel (ray marching already stopped at scene depth).
+    // Distant clouds are only visible on background pixels.
+    float4 currentClouds;
+    if (_LocalClouds)
+        currentClouds = UpsampleClouds(fullCoord, highDepth);
+    else
+        currentClouds = (highDepth == UNITY_RAW_FAR_CLIP_VALUE) ? UpsampleClouds(fullCoord, highDepth) : float4(0.0, 0.0, 0.0, 1.0);
+    currentClouds.w = saturate(currentClouds.w);
+
+    // Simple distance fog on the clouds (optional)
+    if (_CloudFogDistance > 0.0)
+    {
+        float fogFactor = saturate(_MaxCloudDistance / _CloudFogDistance);
+        float3 fogColor = _CloudFogColor;
+        currentClouds.xyz = lerp(currentClouds.xyz, fogColor, fogFactor * (1.0 - currentClouds.w));
+    }
+
+    float4 currentColor = _CameraColorCopy.Load(int3(fullCoord, 0));
+    float finalTransmittance = EvaluateFinalTransmittance(currentColor.rgb, currentClouds.w);
+    _VolumetricCloudsUpscaleTextureRW[fullCoord] = float4(currentColor.xyz * finalTransmittance + currentClouds.xyz, currentColor.a);
+}

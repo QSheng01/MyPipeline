@@ -1,0 +1,61 @@
+#pragma kernel CopyDepth
+#pragma kernel BuildMip
+
+Texture2D<float> _CameraDepthTexture;
+RWTexture2D<float> _DepthMipChain;
+
+float4 _SourceOffsetAndLimit;
+float4 _DestinationOffsetAndSize;
+uint _HiZReversedZ;
+uint _HiZSourceYFlipped;
+
+[numthreads(8, 8, 1)]
+void CopyDepth(uint3 id : SV_DispatchThreadID)
+{
+    uint2 destinationOffset = (uint2)_DestinationOffsetAndSize.xy;
+    uint2 destinationSize = (uint2)_DestinationOffsetAndSize.zw;
+    if (id.x >= destinationSize.x || id.y >= destinationSize.y)
+        return;
+
+    uint sourceWidth;
+    uint sourceHeight;
+    _CameraDepthTexture.GetDimensions(sourceWidth, sourceHeight);
+    sourceWidth = max(sourceWidth, 1);
+    sourceHeight = max(sourceHeight, 1);
+
+    float2 uv = (float2(id.xy) + 0.5) / float2(destinationSize);
+    uint2 sourcePosition = min(
+        uint2(uv * float2(sourceWidth, sourceHeight)),
+        uint2(sourceWidth - 1, sourceHeight - 1));
+    if (_HiZSourceYFlipped != 0)
+        sourcePosition.y = sourceHeight - 1 - sourcePosition.y;
+
+    _DepthMipChain[destinationOffset + id.xy] = _CameraDepthTexture.Load(int3(sourcePosition, 0));
+}
+
+[numthreads(8, 8, 1)]
+void BuildMip(uint3 id : SV_DispatchThreadID)
+{
+    uint2 sourceOffset = (uint2)_SourceOffsetAndLimit.xy;
+    uint2 sourceSize = (uint2)_SourceOffsetAndLimit.zw;
+    uint2 destinationOffset = (uint2)_DestinationOffsetAndSize.xy;
+    uint2 destinationSize = (uint2)_DestinationOffsetAndSize.zw;
+    if (id.x >= destinationSize.x || id.y >= destinationSize.y)
+        return;
+
+    uint2 sourcePosition = sourceOffset + id.xy * 2;
+    uint2 maxPosition = sourceOffset + max(sourceSize, uint2(1, 1)) - 1;
+
+    float d0 = _DepthMipChain[min(sourcePosition + uint2(0, 0), maxPosition)];
+    float d1 = _DepthMipChain[min(sourcePosition + uint2(1, 0), maxPosition)];
+    float d2 = _DepthMipChain[min(sourcePosition + uint2(0, 1), maxPosition)];
+    float d3 = _DepthMipChain[min(sourcePosition + uint2(1, 1), maxPosition)];
+
+    // Keep the farthest depth in each block. This is the conservative value
+    // for occlusion: a cluster is rejected only when the whole block is
+    // behind an occluder. Reversed-Z uses smaller values for farther depth.
+    if (_HiZReversedZ != 0)
+        _DepthMipChain[destinationOffset + id.xy] = min(min(d0, d1), min(d2, d3));
+    else
+        _DepthMipChain[destinationOffset + id.xy] = max(max(d0, d1), max(d2, d3));
+}

@@ -1,0 +1,39 @@
+
+
+#pragma kernel CSMain
+
+#define SizeX 32
+#define SizeY 32
+
+groupshared int sum[32*32];
+groupshared int sum1[32*32];
+Texture2D OverDraw;
+RWStructuredBuffer<int> Output;
+RWStructuredBuffer<int> Output1;
+int BufferSize;
+
+[numthreads(SizeX,SizeY,1)]
+void CSMain (uint3 id : SV_DispatchThreadID,uint3 gid: SV_GroupID,uint gtidx: SV_GroupIndex)
+{
+    //
+    sum[gtidx]= (int)(OverDraw[id.xy].x*50.1f);
+    if(OverDraw[id.xy].x>0)
+    sum1[gtidx]= 1;
+    else sum1[gtidx]=0;
+    GroupMemoryBarrierWithGroupSync();
+    
+    [unroll]
+    for(uint i= 32*16;i>0;i=i>>1)
+    {
+        if(gtidx<i)
+        {
+            sum[gtidx]=sum[gtidx]+sum[gtidx+i];
+            sum1[gtidx]=sum1[gtidx]+sum1[gtidx+i];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if(gtidx!=0) return;
+    Output[gid.x+gid.y*BufferSize]=sum[0];
+    Output1[gid.x+gid.y*BufferSize]=sum1[0];
+}

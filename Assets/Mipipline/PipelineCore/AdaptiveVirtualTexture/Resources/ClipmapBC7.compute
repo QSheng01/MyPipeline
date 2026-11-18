@@ -1,0 +1,86 @@
+// Original BC7 mode-6 encoder. No Unreal Engine source is included.
+// One GPU thread encodes one 4x4 RGBA block into 128 raw bits.
+#pragma kernel Encode
+#pragma target 5.0
+Texture2DArray<float4> Source;
+RWTexture2D<uint4> Blocks;
+uint PagePitch;
+static const uint Weights[16] = { 0,4,9,13,17,21,26,30,34,38,43,47,51,55,60,64 };
+void WriteBits(inout uint4 bits, inout uint offset, uint value, uint count)
+{
+    uint word = offset >> 5, shift = offset & 31;
+    bits[word] |= value << shift;
+    if (shift + count > 32) bits[word + 1] |= value >> (32 - shift);
+    offset += count;
+}
+void QuantizeEndpoint(float4 target, out uint4 q, out uint p, out float4 decoded)
+{
+    target = clamp(target, 0, 255);
+    uint4 a = (uint4)clamp(round(target * 0.5), 0, 127);
+    uint4 b = (uint4)clamp(round((target - 1) * 0.5), 0, 127);
+    float4 da = float4(a * 2) - target, db = float4(b * 2 + 1) - target;
+    p = dot(db, db) < dot(da, da) ? 1 : 0;
+    q = p != 0 ? b : a; decoded = float4(q * 2 + p);
+}
+[numthreads(8,8,1)]
+void Encode(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (PagePitch >> 2))) return;
+    float4 pixels[16]; float4 mean = 0;
+    [unroll] for (uint i=0;i<16;i++)
+    {
+        pixels[i] = round(saturate(Source.Load(int4(id.xy*4+uint2(i&3,i>>2),0,0))) * 255);
+        mean += pixels[i];
+    }
+    mean *= 1.0/16.0;
+    // Principal axis instead of a component-wise bounding box: preserves correlated color ramps.
+    // Seed from the largest variance channel: (1,1,1,1) can be orthogonal to
+    // an opposing-channel ramp (e.g. R increases while G decreases).
+    float4 variance=0;
+    [unroll] for(uint v=0;v<16;v++){float4 d=pixels[v]-mean;variance+=d*d;}
+    uint seed=0;
+    [unroll] for(uint c=1;c<4;c++)if(variance[c]>variance[seed])seed=c;
+    float4 axis=float4(seed==0?1:0,seed==1?1:0,seed==2?1:0,seed==3?1:0);
+    [loop] for(uint iter=0;iter<5;iter++)
+    {
+        float4 next=0;
+        [unroll] for(uint k=0;k<16;k++) {float4 d=pixels[k]-mean; next+=d*dot(d,axis);}
+        axis=next/max(length(next),0.00001);
+    }
+    float lo=1e20,hi=-1e20;
+    [unroll] for(uint j=0;j<16;j++){float t=dot(pixels[j]-mean,axis);lo=min(lo,t);hi=max(hi,t);}
+    float4 e0=clamp(mean+axis*lo,0,255), e1=clamp(mean+axis*hi,0,255);
+    uint4 q0,q1; uint p0,p1; float4 d0,d1; uint indices[16];
+    [loop] for(uint fit=0;fit<3;fit++)
+    {
+        QuantizeEndpoint(e0,q0,p0,d0);QuantizeEndpoint(e1,q1,p1,d1);
+        float aa=0,ab=0,bb=0;float4 av=0,bv=0;
+        [unroll] for(uint pixel=0;pixel<16;pixel++)
+        {
+            float best=1e30;uint chosen=0;
+            [unroll] for(uint index=0;index<16;index++)
+            {
+                float4 value=floor(((64-Weights[index])*d0+Weights[index]*d1+32)/64);
+                float4 error=value-pixels[pixel];float score=dot(error,error);
+                if(score<best){best=score;chosen=index;}
+            }
+            indices[pixel]=chosen;
+            float b=Weights[chosen]/64.0,a=1-b;aa+=a*a;ab+=a*b;bb+=b*b;av+=a*pixels[pixel];bv+=b*pixels[pixel];
+        }
+        float determinant=aa*bb-ab*ab;
+        if(fit<2 && determinant>0.0001){e0=clamp((av*bb-bv*ab)/determinant,0,255);e1=clamp((bv*aa-av*ab)/determinant,0,255);}
+    }
+    // BC7 anchor texel stores only three index bits. Swap endpoints to make its MSB zero.
+    if(indices[0]>=8)
+    {
+        uint4 q=q0;q0=q1;q1=q;uint p=p0;p0=p1;p1=p;
+        [unroll] for(uint n=0;n<16;n++)indices[n]=15-indices[n];
+    }
+    uint4 result=0;uint bit=0;
+    WriteBits(result,bit,64,7); // six zeros followed by one selects mode 6
+    [unroll] for(uint channel=0;channel<4;channel++){WriteBits(result,bit,q0[channel],7);WriteBits(result,bit,q1[channel],7);}
+    WriteBits(result,bit,p0,1);WriteBits(result,bit,p1,1);
+    WriteBits(result,bit,indices[0],3);
+    [unroll] for(uint t=1;t<16;t++)WriteBits(result,bit,indices[t],4);
+    Blocks[id.xy]=result;
+}

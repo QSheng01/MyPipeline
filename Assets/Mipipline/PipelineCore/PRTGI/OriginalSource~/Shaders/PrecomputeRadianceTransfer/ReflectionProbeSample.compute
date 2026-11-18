@@ -1,0 +1,57 @@
+#pragma kernel CSMain
+
+//--------------------------------------------------------------------------------------------------
+// Included headers
+//--------------------------------------------------------------------------------------------------
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.kurisu.illusion-render-pipelines/ShaderLibrary/SphericalHarmonics.hlsl"
+
+//--------------------------------------------------------------------------------------------------
+// Inputs & outputs
+//--------------------------------------------------------------------------------------------------
+
+TextureCube<float4> _inputCubemap;
+SamplerState sampler_point_clamp;
+StructuredBuffer<float4> _sampleDirections;
+RWStructuredBuffer<float> _coefficientSH9;
+uint _sampleCount;
+#define ThreadCount 128
+groupshared float3 coefficients[ThreadCount];
+
+//--------------------------------------------------------------------------------------------------
+// Implementation
+//--------------------------------------------------------------------------------------------------
+
+[numthreads(ThreadCount, 1, 1)]
+void CSMain(uint groupIndex : SV_GroupIndex)
+{
+    // Process each SH coefficient
+    for (uint coefficient = 0; coefficient < 9; coefficient++)
+    {
+        float3 sum = 0;
+        for (uint sampleIndex = groupIndex; sampleIndex < _sampleCount; sampleIndex += ThreadCount)
+        {
+            float4 sample = _sampleDirections[sampleIndex];
+            float basis[9];
+            EvaluateSH9(sample.xyz, basis);
+            sum += _inputCubemap.SampleLevel(sampler_point_clamp, sample.xyz, 0).rgb * basis[coefficient] * sample.w;
+        }
+        coefficients[groupIndex] = sum;
+        GroupMemoryBarrierWithGroupSync();
+        // Parallel reduction
+        for (uint stride = ThreadCount / 2; stride > 0; stride >>= 1)
+        {
+            if (groupIndex < stride) coefficients[groupIndex] += coefficients[groupIndex + stride];
+            GroupMemoryBarrierWithGroupSync();
+        }
+        // Write results
+        if (groupIndex == 0)
+        {
+            _coefficientSH9[coefficient * 3] = coefficients[0].x;
+            _coefficientSH9[coefficient * 3 + 1] = coefficients[0].y;
+            _coefficientSH9[coefficient * 3 + 2] = coefficients[0].z;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+}

@@ -1,0 +1,76 @@
+#pragma kernel CullLights
+
+struct ClusterLightData
+{
+    float4 positionRange;
+    float4 color;
+    float4 directionType;
+    float4 spotParams;
+};
+
+StructuredBuffer<ClusterLightData> _ClusterLights;
+RWStructuredBuffer<uint> _ClusterLightIndices;
+
+float4x4 _ClusterViewMatrix;
+float4 _ClusterCameraParams; // near, far, inverse projection m00, inverse projection m11
+uint4 _ClusterGridParams;    // x, y, z, maximum lights per cluster
+uint _ClusterLightCount;
+
+bool SphereIntersectsAabb(float3 center, float radius, float3 boxMin, float3 boxMax)
+{
+    float3 closest = clamp(center, boxMin, boxMax);
+    float3 delta = center - closest;
+    return dot(delta, delta) <= radius * radius;
+}
+
+[numthreads(64, 1, 1)]
+void CullLights(uint3 id : SV_DispatchThreadID)
+{
+    uint clusterCount = _ClusterGridParams.x * _ClusterGridParams.y * _ClusterGridParams.z;
+    if (id.x >= clusterCount)
+        return;
+
+    uint x = id.x % _ClusterGridParams.x;
+    uint y = (id.x / _ClusterGridParams.x) % _ClusterGridParams.y;
+    uint z = id.x / (_ClusterGridParams.x * _ClusterGridParams.y);
+
+    float nearClip = max(_ClusterCameraParams.x, 0.0001);
+    float farClip = max(_ClusterCameraParams.y, nearClip + 0.0001);
+    float depthRatio = farClip / nearClip;
+    float depthMin = nearClip * pow(depthRatio, (float)z / _ClusterGridParams.z);
+    float depthMax = nearClip * pow(depthRatio, (float)(z + 1) / _ClusterGridParams.z);
+
+    float2 ndcMin = float2(
+        (float)x / _ClusterGridParams.x,
+        (float)y / _ClusterGridParams.y) * 2.0 - 1.0;
+    float2 ndcMax = float2(
+        (float)(x + 1) / _ClusterGridParams.x,
+        (float)(y + 1) / _ClusterGridParams.y) * 2.0 - 1.0;
+    float2 nearMin = ndcMin * depthMin * _ClusterCameraParams.zw;
+    float2 nearMax = ndcMax * depthMin * _ClusterCameraParams.zw;
+    float2 farMin = ndcMin * depthMax * _ClusterCameraParams.zw;
+    float2 farMax = ndcMax * depthMax * _ClusterCameraParams.zw;
+    float2 sliceMin = min(min(nearMin, nearMax), min(farMin, farMax));
+    float2 sliceMax = max(max(nearMin, nearMax), max(farMin, farMax));
+    float3 boxMin = float3(sliceMin, -depthMax);
+    float3 boxMax = float3(sliceMax, -depthMin);
+
+    uint baseIndex = id.x * (_ClusterGridParams.w + 1);
+    uint lightCount = 0;
+    for (uint lightIndex = 0; lightIndex < _ClusterLightCount; ++lightIndex)
+    {
+        ClusterLightData light = _ClusterLights[lightIndex];
+        float3 positionVS = mul(_ClusterViewMatrix, float4(light.positionRange.xyz, 1)).xyz;
+        float radius = max(light.positionRange.w, 0.001);
+        if (!SphereIntersectsAabb(positionVS, radius, boxMin, boxMax))
+            continue;
+
+        if (lightCount < _ClusterGridParams.w)
+        {
+            _ClusterLightIndices[baseIndex + 1 + lightCount] = lightIndex;
+            lightCount++;
+        }
+    }
+
+    _ClusterLightIndices[baseIndex] = lightCount;
+}
